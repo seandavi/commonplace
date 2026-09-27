@@ -1,0 +1,14 @@
+__pycache__/
+*.py[oc]
+build/
+dist/
+*.egg-info
+.venv/
+.pytest_cache/
+
+# local memory stores and exports never belong in the repo
+*.db
+*.db-wal
+*.db-shm
+.env
+export/

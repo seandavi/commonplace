@@ -1,0 +1,33 @@
+[project]
+name = "commonplace"
+version = "0.1.0"
+description = "Shared, durable memory for coding agents across projects and machines (MCP + CLI over SQLite)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Sean Davis", email = "seandavi@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "aiosqlite>=0.21",
+    "click>=8.1",
+    "fastmcp>=3.4.6",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+commonplace = "commonplace:main"
+
+[build-system]
+requires = ["uv_build>=0.8.11,<0.9.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9",
+    "pytest-asyncio>=1.4",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
