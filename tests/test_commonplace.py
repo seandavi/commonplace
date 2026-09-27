@@ -212,3 +212,23 @@ def test_cli_index_unreachable_server_is_silent():
     out = r.invoke(main, ["--url", "http://127.0.0.1:9/mcp", "index", "--scope", G])
     assert out.exit_code == 0
     assert "Shared memory" not in out.output
+
+
+def test_cli_call_bridge(mcp_store):
+    r = CliRunner()
+    args = '{"scope": "global", "name": "n", "type": "user", "description": "d", "body": "b", "agent": "pi"}'
+    out = r.invoke(main, ["call", "remember", args])
+    assert out.exit_code == 0, out.output
+    assert '"author": "pi"' in out.output
+    dup = r.invoke(main, ["call", "remember", args])
+    assert dup.exit_code == 1 and "already exists" in dup.output
+    bad = r.invoke(main, ["call", "get", "[1]"])
+    assert bad.exit_code == 2
+
+
+def test_cli_process_exits(tmp_path: Path):
+    """Regression: an unclosed aiosqlite connection kept the CLI process alive forever."""
+    env = {**__import__("os").environ, "COMMONPLACE_DB": str(tmp_path / "m.db")}
+    args = '{"scope": "global", "name": "n", "type": "user", "description": "d", "body": "b", "agent": "t"}'
+    subprocess.run(["uv", "run", "commonplace", "call", "remember", args], env=env, check=True, timeout=30,
+                   capture_output=True)

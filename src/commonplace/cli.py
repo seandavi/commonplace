@@ -20,7 +20,7 @@ from fastmcp.exceptions import ToolError
 
 from commonplace.importers import claude_memory_files, parse_claude_memory
 from commonplace.scope import session_scopes
-from commonplace.server import mcp
+from commonplace.server import close_store, mcp
 from commonplace.store import TYPES, Store, default_db_path
 
 
@@ -38,8 +38,16 @@ async def _call(ctx: click.Context, tool: str, **args: Any) -> Any:
 def run_async(f: Any) -> Any:
     @wraps(f)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
+        async def main() -> Any:
+            try:
+                return await f(*args, **kwargs)
+            finally:
+                # aiosqlite runs a non-daemon thread; an open connection
+                # would keep the process alive after the command finishes.
+                await close_store()
+
         try:
-            return asyncio.run(f(*args, **kwargs))
+            return asyncio.run(main())
         except ToolError as e:
             raise click.ClickException(str(e)) from e
 
@@ -100,6 +108,26 @@ async def scope(cwd: str) -> None:
     """Print the scopes a session in CWD sees."""
     for s in await session_scopes(cwd):
         click.echo(s)
+
+
+@main.command()
+@click.argument("tool")
+@click.argument("args_json", default="{}")
+@click.pass_context
+@run_async
+async def call(ctx: click.Context, tool: str, args_json: str) -> None:
+    """Call any MCP tool with a JSON object of arguments; print the JSON result.
+
+    The bridge for agents that can run commands but don't speak MCP
+    (e.g. the pi extension): same tools, same semantics.
+    """
+    try:
+        args = json.loads(args_json)
+    except json.JSONDecodeError as e:
+        raise click.BadParameter(f"not JSON: {e}", param_hint="ARGS_JSON") from e
+    if not isinstance(args, dict):
+        raise click.BadParameter("must be a JSON object", param_hint="ARGS_JSON")
+    _echo_json(await _call(ctx, tool, **args))
 
 
 @main.command()

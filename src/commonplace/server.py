@@ -42,6 +42,11 @@ def set_store(store: Store | None) -> None:
     _store = store
 
 
+async def close_store() -> None:
+    if _store is not None:
+        await _store.close()
+
+
 async def get_store() -> Store:
     global _store
     if _store is None:
