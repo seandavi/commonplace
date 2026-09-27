@@ -18,6 +18,7 @@ import click
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
+from commonplace.config import setting
 from commonplace.importers import claude_memory_files, parse_claude_memory
 from commonplace.scope import host_name, session_scopes
 from commonplace.server import close_store, mcp
@@ -59,11 +60,15 @@ def _echo_json(data: Any) -> None:
 
 
 @click.group()
-@click.option("--url", envvar="COMMONPLACE_URL", help="Shared server, e.g. http://host:9322/mcp. Default: local DB.")
+@click.option("--url", help="Shared server, e.g. http://host:9322/mcp. Default: $COMMONPLACE_URL, the config file, else the local DB.")
 @click.pass_context
 def main(ctx: click.Context, url: str | None) -> None:
-    """Shared, durable memory for coding agents."""
-    ctx.obj = {"url": url}
+    """Shared, durable memory for coding agents.
+
+    Per-machine defaults (server url, host name) live in
+    ~/.config/commonplace/config.toml.
+    """
+    ctx.obj = {"url": url or setting("url")}
 
 
 @main.command()

@@ -17,6 +17,18 @@ G = "global"
 P = "project:github.com/seandavi/vault-mcp"
 
 
+@pytest.fixture(autouse=True)
+def isolated_config(tmp_path: Path, monkeypatch):
+    """Never read the developer's real ~/.config/commonplace/config.toml."""
+    from commonplace import config
+
+    monkeypatch.setenv("COMMONPLACE_CONFIG", str(tmp_path / "no-config.toml"))
+    monkeypatch.delenv("COMMONPLACE_URL", raising=False)
+    config._file.cache_clear()
+    yield
+    config._file.cache_clear()
+
+
 @pytest.fixture
 async def store(tmp_path: Path):
     async with Store(tmp_path / "m.db") as s:
@@ -258,3 +270,17 @@ def test_cli_index_hook_json(mcp_store):
     payload = json.loads(out.output)
     assert payload["hookSpecificOutput"]["hookEventName"] == "SessionStart"
     assert "Shared memory" in payload["hookSpecificOutput"]["additionalContext"]
+
+
+def test_config_file_and_env_override(tmp_path: Path, monkeypatch):
+    from commonplace import config
+
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('url = "http://example:9322/mcp"\nhost = "Laptop"\n')
+    monkeypatch.setenv("COMMONPLACE_CONFIG", str(cfg))
+    monkeypatch.delenv("COMMONPLACE_HOST", raising=False)
+    config._file.cache_clear()
+    assert config.setting("url") == "http://example:9322/mcp"
+    assert host_name() == "laptop"
+    monkeypatch.setenv("COMMONPLACE_HOST", "override")
+    assert host_name() == "override"

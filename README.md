@@ -58,10 +58,20 @@ pi ──────────┘  extension → commonplace CLI        (one 
 uv tool install git+https://github.com/seandavi/commonplace
 ```
 
-Every command except `serve` and `export` is an MCP client. With
-`COMMONPLACE_URL` set, it talks to the shared server. Without it, it runs
-the server in-process against the local database
+Every command except `serve` and `export` is an MCP client. Given a server
+URL it talks to the shared server; without one it runs the server
+in-process against the local database
 (`~/.local/share/commonplace/memory.db`, or `$COMMONPLACE_DB`).
+
+Per-machine settings live in `~/.config/commonplace/config.toml`, so hooks
+and agents need no environment plumbing:
+
+```toml
+url = "http://<tailscale-ip>:9322/mcp"   # the shared server
+host = "macbook"                         # this machine's host: scope name
+```
+
+`COMMONPLACE_URL` and `COMMONPLACE_HOST` override the file.
 
 ```sh
 commonplace index                    # session index: global + this repo's project scope
@@ -91,11 +101,11 @@ tailnet can reach it.
 > → Privacy & Security → Full Disk Access), then
 > `launchctl kickstart -k gui/$(id -u)/com.seandavis.commonplace`.
 
-On every machine, point clients at it:
+On Linux, use the systemd user unit instead: `deploy/commonplace.service`
+(install steps are in its header).
 
-```sh
-export COMMONPLACE_URL=http://<tailscale-ip>:9322/mcp
-```
+On every machine, point clients at it in `~/.config/commonplace/config.toml`
+(see above).
 
 ## Connecting agents
 
@@ -112,7 +122,7 @@ and in `~/.claude/settings.json`:
   "hooks": {
     "SessionStart": [
       { "hooks": [{ "type": "command",
-                    "command": "COMMONPLACE_URL=http://<tailscale-ip>:9322/mcp commonplace index --hook" }] }
+                    "command": "commonplace index --hook" }] }
     ]
   }
 }
@@ -144,8 +154,8 @@ ln -s "$PWD/integrations/pi/commonplace.ts" ~/.pi/agent/extensions/
 
 The extension appends the index to the system prompt and registers
 `memory_recall`, `memory_get`, `memory_remember`, `memory_update` and
-`memory_forget`. It calls the `commonplace` CLI, so it follows
-`COMMONPLACE_URL` like everything else. It uses `appendSystemPrompt` rather
+`memory_forget`. It calls the `commonplace` CLI, so it uses the same config
+file as everything else. It uses `appendSystemPrompt` rather
 than a custom prompt section because providers such as `pi-claude-bridge`
 forward only the append text.
 

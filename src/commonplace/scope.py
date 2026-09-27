@@ -4,7 +4,8 @@ Three kinds of scope, each visible to a session only when it applies:
 
 - `global`: everywhere.
 - `host:<name>`: only on that machine (temp dirs, local services, paths).
-  The name is $COMMONPLACE_HOST, else the short hostname, lowercased.
+  The name is `host` from the config (or $COMMONPLACE_HOST), else the
+  short hostname, lowercased.
 - `project:<host/owner/repo>`: only in that repo. It comes from the git
   remote, not the path, so the same repo maps to the same scope on every
   machine.
@@ -13,10 +14,11 @@ Three kinds of scope, each visible to a session only when it applies:
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import socket
 from pathlib import Path
+
+from commonplace.config import setting
 
 _SCP = re.compile(r"^[\w.-]+@([\w.-]+):(.+)$")  # git@github.com:owner/repo.git
 
@@ -61,7 +63,7 @@ async def project_scope(cwd: Path | str = ".") -> str | None:
 
 
 def host_name() -> str:
-    name = os.environ.get("COMMONPLACE_HOST") or socket.gethostname().split(".")[0]
+    name = setting("host") or socket.gethostname().split(".")[0]
     return re.sub(r"[^a-z0-9.-]+", "-", name.lower()).strip("-.") or "localhost"
 
 
