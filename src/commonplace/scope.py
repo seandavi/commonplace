@@ -1,13 +1,21 @@
 """Derive memory scopes from where an agent is working.
 
-A project's scope comes from its git remote, not its path, so the same repo
-maps to the same scope on every machine: `project:github.com/owner/repo`.
+Three kinds of scope, each visible to a session only when it applies:
+
+- `global`: everywhere.
+- `host:<name>`: only on that machine (temp dirs, local services, paths).
+  The name is $COMMONPLACE_HOST, else the short hostname, lowercased.
+- `project:<host/owner/repo>`: only in that repo. It comes from the git
+  remote, not the path, so the same repo maps to the same scope on every
+  machine.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import socket
 from pathlib import Path
 
 _SCP = re.compile(r"^[\w.-]+@([\w.-]+):(.+)$")  # git@github.com:owner/repo.git
@@ -52,7 +60,16 @@ async def project_scope(cwd: Path | str = ".") -> str | None:
     return f"project:{slug}" if slug else None
 
 
+def host_name() -> str:
+    name = os.environ.get("COMMONPLACE_HOST") or socket.gethostname().split(".")[0]
+    return re.sub(r"[^a-z0-9.-]+", "-", name.lower()).strip("-.") or "localhost"
+
+
+def host_scope() -> str:
+    return f"host:{host_name()}"
+
+
 async def session_scopes(cwd: Path | str = ".") -> list[str]:
-    """Scopes an agent session should see: global, plus the current project's if any."""
+    """Scopes an agent session should see: global, this machine, and the current project if any."""
     project = await project_scope(cwd)
-    return ["global", project] if project else ["global"]
+    return ["global", host_scope(), *([project] if project else [])]

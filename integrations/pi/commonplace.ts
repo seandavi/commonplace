@@ -16,11 +16,13 @@
  */
 
 import { execFile } from "node:child_process";
+import { hostname } from "node:os";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const BIN = process.env.COMMONPLACE_BIN || "commonplace";
-const AGENT = "pi";
+const HOST = (process.env.COMMONPLACE_HOST || hostname().split(".")[0]).toLowerCase();
+const AGENT = `pi@${HOST}`;
 const MARKER = "<!-- commonplace -->";
 
 function run(args: string[], cwd?: string): Promise<string> {

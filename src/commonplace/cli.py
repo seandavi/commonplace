@@ -19,7 +19,7 @@ from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
 from commonplace.importers import claude_memory_files, parse_claude_memory
-from commonplace.scope import session_scopes
+from commonplace.scope import host_name, session_scopes
 from commonplace.server import close_store, mcp
 from commonplace.store import TYPES, Store, default_db_path
 
@@ -170,7 +170,7 @@ async def get(ctx: click.Context, scope_: str, name: str, as_json: bool) -> None
 @click.option("--type", "type_", required=True, type=click.Choice(TYPES))
 @click.option("--description", required=True)
 @click.option("--body", default="-", help="Body text, or - to read stdin.")
-@click.option("--agent", default="cli", show_default=True)
+@click.option("--agent", default=None, help="Author to record. Default: cli@<host>.")
 @click.pass_context
 @run_async
 async def remember(
@@ -179,6 +179,7 @@ async def remember(
     """Save a new memory."""
     if body == "-":
         body = sys.stdin.read()
+    agent = agent or f"cli@{host_name()}"
     m = await _call(
         ctx, "remember", scope=scope_, name=name, type=type_, description=description, body=body, agent=agent
     )
@@ -188,11 +189,12 @@ async def remember(
 @main.command()
 @click.argument("scope_")
 @click.argument("name")
-@click.option("--agent", default="cli", show_default=True)
+@click.option("--agent", default=None, help="Author to record. Default: cli@<host>.")
 @click.pass_context
 @run_async
 async def forget(ctx: click.Context, scope_: str, name: str, agent: str) -> None:
     """Retire a memory (kept in history)."""
+    agent = agent or f"cli@{host_name()}"
     await _call(ctx, "forget", scope=scope_, name=name, agent=agent)
     click.echo(f"forgot {scope_}/{name}")
 
@@ -200,7 +202,7 @@ async def forget(ctx: click.Context, scope_: str, name: str, agent: str) -> None
 @main.command(name="import-claude")
 @click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
 @click.option("--scope", "scope_", required=True, help="Scope for every imported memory.")
-@click.option("--agent", default="claude-code", show_default=True)
+@click.option("--agent", default=None, help="Author to record. Default: claude-code@<host>.")
 @click.option("--dry-run", is_flag=True)
 @click.pass_context
 @run_async
@@ -209,6 +211,7 @@ async def import_claude(ctx: click.Context, paths: tuple[Path, ...], scope_: str
 
     Existing memories with the same name are left alone, so re-running is safe.
     """
+    agent = agent or f"claude-code@{host_name()}"
     parsed = [m for f in claude_memory_files(list(paths)) if (m := parse_claude_memory(f))]
     async with _client(ctx) as client:
         for m in parsed:

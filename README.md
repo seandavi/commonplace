@@ -25,9 +25,14 @@ keeping.
   (Claude Code, Codex) or the pi extension puts it in context, and agents
   fetch full bodies with `get` / `recall`.
 - **Scopes.** `global` holds facts about you and how you work.
-  `project:<host/owner/repo>` holds facts about one repo. The project scope
-  comes from the git remote, not the path, so a repo maps to the same scope
-  on every machine.
+  `host:<hostname>` holds facts true only on one machine (a temp dir that
+  isn't `/tmp`, a local service, where tools live). `project:<host/owner/repo>`
+  holds facts about one repo. The project scope comes from the git remote,
+  not the path, so a repo maps to the same scope on every machine. A session
+  sees `global`, its own host and its own project in the index; `recall`
+  without scopes searches everything, so one project can find what another
+  learned. Set `COMMONPLACE_HOST` when the hostname is unhelpful (e.g. a Mac
+  named by its serial number).
 - **Types.** `user`, `feedback`, `project`, `reference`, the same four as
   Claude Code's memory, so its memories import unchanged.
 - **Nothing is lost.** `update` writes a new version and `forget`
