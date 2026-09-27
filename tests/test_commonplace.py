@@ -232,3 +232,12 @@ def test_cli_process_exits(tmp_path: Path):
     args = '{"scope": "global", "name": "n", "type": "user", "description": "d", "body": "b", "agent": "t"}'
     subprocess.run(["uv", "run", "commonplace", "call", "remember", args], env=env, check=True, timeout=30,
                    capture_output=True)
+
+
+def test_cli_index_hook_json(mcp_store):
+    import json
+
+    out = CliRunner().invoke(main, ["index", "--scope", G, "--hook"])
+    payload = json.loads(out.output)
+    assert payload["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    assert "Shared memory" in payload["hookSpecificOutput"]["additionalContext"]

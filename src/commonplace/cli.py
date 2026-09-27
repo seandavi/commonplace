@@ -82,9 +82,10 @@ def serve(use_http: bool, host: str, port: int) -> None:
 @click.option("--scope", "scopes", multiple=True, help="Scope to include (repeatable). Default: global + this project.")
 @click.option("--cwd", default=".", type=click.Path(file_okay=False), help="Directory to derive the project scope from.")
 @click.option("--strict", is_flag=True, help="Fail loudly if the server is unreachable (default: print nothing).")
+@click.option("--hook", "as_hook", is_flag=True, help="Emit SessionStart hook JSON (Claude Code, Codex) instead of markdown.")
 @click.pass_context
 @run_async
-async def index(ctx: click.Context, scopes: tuple[str, ...], cwd: str, strict: bool) -> None:
+async def index(ctx: click.Context, scopes: tuple[str, ...], cwd: str, strict: bool, as_hook: bool) -> None:
     """Print the memory index for a session. Built for session-start hooks.
 
     Unless --strict, an unreachable server prints nothing and exits 0, so a
@@ -98,7 +99,11 @@ async def index(ctx: click.Context, scopes: tuple[str, ...], cwd: str, strict: b
             raise
         click.echo(f"commonplace: index unavailable ({e.__class__.__name__}: {e})", err=True)
         return
-    click.echo(text, nl=False)
+    if as_hook:
+        payload = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}
+        click.echo(json.dumps(payload))
+    else:
+        click.echo(text, nl=False)
 
 
 @main.command()
