@@ -321,3 +321,7 @@ def test_cli_import_infer_scope(mcp_store, tmp_path: Path):
     assert "unresolved b" in out.output
     both = r.invoke(main, ["import-claude", "--infer-scope", "--scope", "global", str(mem)])
     assert both.exit_code == 2
+
+
+def test_instructions_rule_out_personal_judgments():
+    assert "never personal judgments" in server.INSTRUCTIONS
