@@ -10,11 +10,23 @@ from fastmcp import Client
 from commonplace import server
 from commonplace.cli import main
 from commonplace.importers import parse_claude_memory, slugify
-from commonplace.scope import normalize_remote, project_scope, session_scopes
+from commonplace.scope import host_name, normalize_remote, project_scope, session_scopes
 from commonplace.store import Store, StoreError, fts_query
 
 G = "global"
 P = "project:github.com/seandavi/vault-mcp"
+
+
+@pytest.fixture(autouse=True)
+def isolated_config(tmp_path: Path, monkeypatch):
+    """Never read the developer's real ~/.config/commonplace/config.toml."""
+    from commonplace import config
+
+    monkeypatch.setenv("COMMONPLACE_CONFIG", str(tmp_path / "no-config.toml"))
+    monkeypatch.delenv("COMMONPLACE_URL", raising=False)
+    config._file.cache_clear()
+    yield
+    config._file.cache_clear()
 
 
 @pytest.fixture
@@ -135,12 +147,28 @@ def test_normalize_remote(url, slug):
     assert normalize_remote(url) == slug
 
 
-async def test_project_scope_from_git(tmp_path: Path):
+async def test_project_scope_from_git(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("COMMONPLACE_HOST", "box")
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     assert await project_scope(tmp_path) is None
-    assert await session_scopes(tmp_path) == [G]
+    assert await session_scopes(tmp_path) == [G, "host:box"]
     subprocess.run(["git", "-C", str(tmp_path), "remote", "add", "origin", "git@github.com:o/r.git"], check=True)
-    assert await session_scopes(tmp_path) == [G, "project:github.com/o/r"]
+    assert await session_scopes(tmp_path) == [G, "host:box", "project:github.com/o/r"]
+
+
+@pytest.mark.parametrize("raw, name", [("K3R4F5MWPG", "k3r4f5mwpg"), ("My Mac.local", "my-mac.local"), ("", None)])
+def test_host_name(monkeypatch, raw, name):
+    monkeypatch.setenv("COMMONPLACE_HOST", raw)
+    if name is None:  # empty override falls back to the real hostname
+        assert host_name()
+    else:
+        assert host_name() == name
+
+
+async def test_host_scope_is_a_valid_scope(store: Store):
+    await add(store, "tmp-dir", scope="host:onclappc02", description="Use /data/davsean/tmp, not /tmp")
+    assert [m.name for m in await store.index(["global", "host:onclappc02"])] == ["tmp-dir"]
+    assert await store.index(["global", "host:k3r4f5mwpg"]) == []
 
 
 # --- importer --------------------------------------------------------------
@@ -187,7 +215,8 @@ async def test_mcp_round_trip(mcp_store):
         )
         assert dup.is_error and "already exists" in dup.content[0].text
         idx = (await c.call_tool("memory_index", {"scopes": [G, P]})).data
-        assert "**polars** (user) — Prefer polars" in idx and f"## {P}\n\n(none yet)" in idx
+        assert "**polars** (user) — Prefer polars" in idx
+        assert f"`{P}`" in idx and f"## {P}" not in idx  # scope named, empty section omitted
         hits = (await c.call_tool("recall", {"query": "polars"})).data
         assert hits[0]["name"] == "polars"
 
@@ -241,3 +270,17 @@ def test_cli_index_hook_json(mcp_store):
     payload = json.loads(out.output)
     assert payload["hookSpecificOutput"]["hookEventName"] == "SessionStart"
     assert "Shared memory" in payload["hookSpecificOutput"]["additionalContext"]
+
+
+def test_config_file_and_env_override(tmp_path: Path, monkeypatch):
+    from commonplace import config
+
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('url = "http://example:9322/mcp"\nhost = "Laptop"\n')
+    monkeypatch.setenv("COMMONPLACE_CONFIG", str(cfg))
+    monkeypatch.delenv("COMMONPLACE_HOST", raising=False)
+    config._file.cache_clear()
+    assert config.setting("url") == "http://example:9322/mcp"
+    assert host_name() == "laptop"
+    monkeypatch.setenv("COMMONPLACE_HOST", "override")
+    assert host_name() == "override"

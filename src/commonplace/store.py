@@ -23,7 +23,7 @@ from typing import Any
 import aiosqlite
 
 TYPES = ("user", "feedback", "project", "reference")
-SCOPE_RE = re.compile(r"^(global|project:[a-z0-9][a-z0-9._/-]*)$")
+SCOPE_RE = re.compile(r"^(global|host:[a-z0-9][a-z0-9.-]*|project:[a-z0-9][a-z0-9._/-]*)$")
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")
 
 SCHEMA = """
@@ -86,7 +86,9 @@ def _now() -> str:
 
 def check_scope(scope: str) -> str:
     if not SCOPE_RE.match(scope):
-        raise StoreError(f"invalid scope {scope!r}: use 'global' or 'project:<host/owner/repo>'")
+        raise StoreError(
+            f"invalid scope {scope!r}: use 'global', 'host:<hostname>' or 'project:<host/owner/repo>'"
+        )
     return scope
 
 

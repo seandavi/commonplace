@@ -7,9 +7,9 @@
  *   - tools: memory_recall, memory_get, memory_remember, memory_update,
  *     memory_forget — thin wrappers over `commonplace call <tool> <json>`.
  *
- * Requires the `commonplace` CLI on PATH (`uv tool install ...`). Set
- * COMMONPLACE_URL to use the shared server on the tailnet; otherwise the
- * CLI uses the local database. If the CLI or server is unavailable the
+ * Requires the `commonplace` CLI on PATH (`uv tool install ...`). The CLI
+ * finds the shared server via ~/.config/commonplace/config.toml (or
+ * COMMONPLACE_URL); otherwise it uses the local database. If the CLI or server is unavailable the
  * extension stays quiet and pi starts normally.
  *
  * Install: copy or symlink into ~/.pi/agent/extensions/.
@@ -20,7 +20,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const BIN = process.env.COMMONPLACE_BIN || "commonplace";
-const AGENT = "pi";
+let AGENT = "pi"; // becomes pi@<host> once the CLI reports this machine's host scope
 const MARKER = "<!-- commonplace -->";
 
 function run(args: string[], cwd?: string): Promise<string> {
@@ -35,7 +35,9 @@ function run(args: string[], cwd?: string): Promise<string> {
 const call = (tool: string, args: Record<string, unknown>) => run(["call", tool, JSON.stringify(args)]);
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }], details: undefined });
 
-const SCOPE = Type.String({ description: "'global' or 'project:<host/owner/repo>' (see the commonplace prompt section)" });
+const SCOPE = Type.String({
+	description: "'global', 'host:<hostname>' or 'project:<host/owner/repo>' (the prompt section lists this session's scopes)",
+});
 const NAME = Type.String({ description: "Short kebab-case slug, unique within the scope" });
 const TYPE = Type.Union(
 	[Type.Literal("user"), Type.Literal("feedback"), Type.Literal("project"), Type.Literal("reference")],
@@ -118,6 +120,8 @@ export default function commonplace(pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		try {
+			const host = (await run(["scope", ctx.cwd], ctx.cwd)).split("\n").find((l) => l.startsWith("host:"));
+			if (host) AGENT = `pi@${host.slice("host:".length).trim()}`;
 			index = (await run(["index", "--cwd", ctx.cwd], ctx.cwd)).trim();
 		} catch {
 			index = ""; // CLI missing or server down: start without shared memory
