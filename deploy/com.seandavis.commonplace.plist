@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent for the commonplace tailnet HTTP server (see README → Serving
+  the tailnet). Runs deploy/commonplace-tailnet.sh, which binds this
+  machine's Tailscale IP on port 9322. No app-level auth: Tailscale is the
+  auth layer. Edit the paths for your machine before installing.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.seandavis.commonplace</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>/Users/davsean/Documents/git/commonplace/deploy/commonplace-tailnet.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/davsean/.local/state/commonplace-http.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/davsean/.local/state/commonplace-http.log</string>
+</dict>
+</plist>
