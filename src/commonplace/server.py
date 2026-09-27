@@ -36,7 +36,11 @@ Rules:
   rather than creating a near-duplicate.
 - Write only what will still be true and useful in a future session. Not
   code structure, git history or anything the repo already records.
-- Never store secrets, credentials or tokens.
+- Store facts, decisions and stated preferences, never personal judgments:
+  no characterizations of the user's or anyone else's abilities, character,
+  motivations, feelings or health. "Sean asked for X" is fine; "Sean is Y"
+  is not.
+- Never store secrets, credentials or tokens, or where they are kept.
 - Always pass `agent` as your agent name (e.g. claude-code, codex, pi).
 """
 

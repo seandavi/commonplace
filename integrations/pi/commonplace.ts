@@ -74,7 +74,7 @@ const rememberTool = defineTool({
 	description:
 		"Save a durable memory shared with other agents and machines: facts about the user, how they want work done " +
 		"(with the why), ongoing project context, or pointers to external resources. Not code structure, git history, " +
-		"or secrets. Recall first; update instead of duplicating.",
+		"secrets, or personal judgments about anyone. Recall first; update instead of duplicating.",
 	parameters: Type.Object({
 		scope: SCOPE,
 		name: NAME,
