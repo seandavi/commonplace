@@ -9,7 +9,7 @@ from fastmcp import Client
 
 from commonplace import server
 from commonplace.cli import main
-from commonplace.importers import parse_claude_memory, slugify
+from commonplace.importers import _decode_by_walking, _encode, claude_project_path, parse_claude_memory, slugify
 from commonplace.scope import host_name, normalize_remote, project_scope, session_scopes
 from commonplace.store import Store, StoreError, fts_query
 
@@ -284,3 +284,40 @@ def test_config_file_and_env_override(tmp_path: Path, monkeypatch):
     assert host_name() == "laptop"
     monkeypatch.setenv("COMMONPLACE_HOST", "override")
     assert host_name() == "override"
+
+
+def test_decode_project_dir_by_walking(tmp_path: Path):
+    repo = tmp_path / "git" / "next_flow-telemetry"  # '_' and '-' both encode to '-'
+    repo.mkdir(parents=True)
+    (tmp_path / "git" / "next").mkdir()  # shorter decoy prefix
+    assert _decode_by_walking(_encode(str(repo))) == repo
+    assert _decode_by_walking(_encode(str(tmp_path / "gone"))) is None
+
+
+def test_project_path_prefers_transcript_cwd(tmp_path: Path):
+    real = tmp_path / "work"
+    real.mkdir()
+    pdir = tmp_path / "projects" / "-whatever"
+    pdir.mkdir(parents=True)
+    (pdir / "s.jsonl").write_text('{"type": "x"}\n{"cwd": "%s"}\n' % real)
+    assert claude_project_path(pdir) == real
+
+
+def test_cli_import_infer_scope(mcp_store, tmp_path: Path):
+    repo = tmp_path / "code" / "my-repo"
+    repo.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", "git@github.com:me/my-repo.git"], check=True)
+    mem = tmp_path / "projects" / _encode(str(repo)) / "memory"
+    mem.mkdir(parents=True)
+    (mem / "a.md").write_text("---\nname: a\ndescription: first\ntype: project\n---\nbody\n")
+    gone = tmp_path / "projects" / "-nowhere-at-all" / "memory"
+    gone.mkdir(parents=True)
+    (gone / "b.md").write_text("---\nname: b\ndescription: second\ntype: project\n---\nbody\n")
+    r = CliRunner()
+    out = r.invoke(main, ["import-claude", "--infer-scope", str(mem), str(gone)])
+    assert out.exit_code == 0, out.output
+    assert "imported project:github.com/me/my-repo/a" in out.output
+    assert "unresolved b" in out.output
+    both = r.invoke(main, ["import-claude", "--infer-scope", "--scope", "global", str(mem)])
+    assert both.exit_code == 2

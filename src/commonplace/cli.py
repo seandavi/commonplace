@@ -19,8 +19,8 @@ from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
 from commonplace.config import setting
-from commonplace.importers import claude_memory_files, parse_claude_memory
-from commonplace.scope import host_name, session_scopes
+from commonplace.importers import claude_memory_files, claude_project_path, parse_claude_memory
+from commonplace.scope import host_name, project_scope, session_scopes
 from commonplace.server import close_store, mcp
 from commonplace.store import TYPES, Store, default_db_path
 
@@ -206,33 +206,60 @@ async def forget(ctx: click.Context, scope_: str, name: str, agent: str) -> None
 
 @main.command(name="import-claude")
 @click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
-@click.option("--scope", "scope_", required=True, help="Scope for every imported memory.")
+@click.option("--scope", "scope_", help="Scope for every imported memory.")
+@click.option("--infer-scope", is_flag=True,
+              help="Scope each memory by its Claude project's git remote (project:<host/owner/repo>).")
 @click.option("--agent", default=None, help="Author to record. Default: claude-code@<host>.")
 @click.option("--dry-run", is_flag=True)
 @click.pass_context
 @run_async
-async def import_claude(ctx: click.Context, paths: tuple[Path, ...], scope_: str, agent: str, dry_run: bool) -> None:
-    """Import Claude Code memory files (or memory/ directories) into SCOPE.
+async def import_claude(
+    ctx: click.Context, paths: tuple[Path, ...], scope_: str | None, infer_scope: bool, agent: str | None, dry_run: bool
+) -> None:
+    """Import Claude Code memory files (or memory/ directories).
 
-    Existing memories with the same name are left alone, so re-running is safe.
+    Give --scope for a fixed scope, or --infer-scope to put each memory in
+    the project scope of the repo its Claude project directory belongs to.
+    Memories whose project can't be resolved (directory gone, no git remote)
+    are reported and skipped. Existing memories with the same name are left
+    alone, so re-running is safe.
     """
+    if bool(scope_) == infer_scope:
+        raise click.UsageError("give exactly one of --scope or --infer-scope")
     agent = agent or f"claude-code@{host_name()}"
-    parsed = [m for f in claude_memory_files(list(paths)) if (m := parse_claude_memory(f))]
+    scopes: dict[Path, str | None] = {}
+
+    async def scope_for(f: Path) -> str | None:
+        if scope_:
+            return scope_
+        project_dir = f.resolve().parent.parent
+        if project_dir not in scopes:
+            path = claude_project_path(project_dir)
+            scopes[project_dir] = await project_scope(path) if path else None
+        return scopes[project_dir]
+
     async with _client(ctx) as client:
-        for m in parsed:
-            if dry_run:
-                click.echo(f"would import {scope_}/{m.name} ({m.type}) ← {m.source}")
+        for f in claude_memory_files(list(paths)):
+            m = parse_claude_memory(f)
+            if m is None:
                 continue
-            existing = await client.call_tool("get", {"scope": scope_, "name": m.name}, raise_on_error=False)
+            scope = await scope_for(f)
+            if scope is None:
+                click.echo(f"unresolved {m.name} ← {f} (project dir gone or no git remote)")
+                continue
+            if dry_run:
+                click.echo(f"would import {scope}/{m.name} ({m.type}) — {m.description[:90]} ← {f}")
+                continue
+            existing = await client.call_tool("get", {"scope": scope, "name": m.name}, raise_on_error=False)
             if not existing.is_error:
-                click.echo(f"skip {scope_}/{m.name} (exists)")
+                click.echo(f"skip {scope}/{m.name} (exists)")
                 continue
             await client.call_tool(
                 "remember",
-                {"scope": scope_, "name": m.name, "type": m.type, "description": m.description,
+                {"scope": scope, "name": m.name, "type": m.type, "description": m.description,
                  "body": m.body, "agent": agent},
             )
-            click.echo(f"imported {scope_}/{m.name}")
+            click.echo(f"imported {scope}/{m.name}")
 
 
 @main.command()
