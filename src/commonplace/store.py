@@ -31,6 +31,7 @@ SCOPE_RE = re.compile(r"^(global|host:[a-z0-9][a-z0-9.-]*|project:[a-z0-9][a-z0-
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")
 
 DEFAULT_MAX_BODY = 4000
+INDEX_BUDGET_CHARS = 8000
 # A neighbour is "similar" when its BM25 score against the new memory's name and
 # description is at least this fraction of the memory's own score. Calibrated on
 # the live store: known duplicates score 0.47-0.61, and 0.45 flags about 18% of memories.
@@ -357,12 +358,26 @@ class Store:
             return []
         return [r["name"] for r in rows if r["id"] != m.id and r["score"] / self_score >= SIMILAR_RATIO][:limit]
 
+    async def index_chars(self, scope: str) -> int:
+        """Approximate size of a scope's index lines, in characters."""
+        cur = await self.db.execute(
+            "SELECT COALESCE(SUM(length(name) + length(type) + length(description) + 12), 0) "
+            f"FROM memories WHERE scope = ? AND {LIVE}",
+            (scope,),
+        )
+        return (await cur.fetchone())[0]
+
     async def write_warnings(self, m: Memory) -> list[str]:
-        """Warnings for the agent that just wrote m: likely duplicates."""
+        """Warnings for the agent that just wrote m: likely duplicates, an oversized index."""
         warnings = []
         if names := await self.similar(m):
             warnings.append(
                 f"Similar memories already in {m.scope}: {', '.join(names)}. If one of them covers "
                 f"this fact, update it instead and forget {m.scope}/{m.name}."
+            )
+        if (n := await self.index_chars(m.scope)) > INDEX_BUDGET_CHARS:
+            warnings.append(
+                f"The {m.scope} index is {n} characters, over the {INDEX_BUDGET_CHARS}-character "
+                "budget; merge or forget memories in this scope."
             )
         return warnings

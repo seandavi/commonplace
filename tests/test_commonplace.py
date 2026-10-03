@@ -180,6 +180,11 @@ async def test_similar_warning(store: Store):
     assert not any(w.startswith("Similar") for w in await store.write_warnings(other))
 
 
+async def test_index_budget_warning(store: Store, monkeypatch):
+    monkeypatch.setattr("commonplace.store.INDEX_BUDGET_CHARS", 40)
+    m = await add(store, "budget", description="long enough to exceed a tiny index budget")
+    assert any("over the 40-character budget" in w for w in await store.write_warnings(m))
+
 
 # --- scope -----------------------------------------------------------------
 

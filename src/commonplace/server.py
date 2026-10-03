@@ -108,7 +108,8 @@ async def remember(
             with **Why:** and **How to apply:** lines.
         agent: Your agent name, recorded as the author.
 
-    Returns the memory plus `warnings` naming similar memories in the scope.
+    Returns the memory plus `warnings`: similar memories in the scope, or an
+    index over its size budget.
     """
     store = await get_store()
     m = await _run(store.remember(scope=scope, name=name, type=type, description=description, body=body, author=agent))
