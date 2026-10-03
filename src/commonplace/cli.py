@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from datetime import date, timedelta
 from functools import wraps
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,7 @@ from commonplace.config import setting
 from commonplace.importers import claude_memory_files, claude_project_path, parse_claude_memory
 from commonplace.scope import host_name, project_scope, session_scopes
 from commonplace.server import close_store, mcp
-from commonplace.store import TYPES, Store, default_db_path, max_body_chars
+from commonplace.store import TYPES, Store, default_db_path, max_body_chars, today
 
 
 def _client(ctx: click.Context) -> Client:
@@ -281,9 +282,15 @@ async def import_claude(
                 click.echo(f"  warning: {m.warning}")
 
 
+_DB_OPTION = click.option(
+    "--db", type=click.Path(dir_okay=False, path_type=Path),
+    help="Default: $COMMONPLACE_DB or ~/.local/share/commonplace/memory.db",
+)
+
+
 @main.command()
 @click.argument("out_dir", type=click.Path(file_okay=False, path_type=Path))
-@click.option("--db", type=click.Path(dir_okay=False, path_type=Path), help="Default: $COMMONPLACE_DB or ~/.local/share/commonplace/memory.db")
+@_DB_OPTION
 @run_async
 async def export(out_dir: Path, db: Path | None) -> None:
     """Write live memories as markdown files (one per memory) for review or git.
@@ -303,3 +310,36 @@ async def export(out_dir: Path, db: Path | None) -> None:
         front = "\n".join(f"{k}: {json.dumps(v)}" for k, v in fields)
         (folder / f"{m.name}.md").write_text(f"---\n{front}\n---\n\n{m.body}\n")
     click.echo(f"exported {len(memories)} memories to {out_dir}")
+
+
+@main.command()
+@_DB_OPTION
+@click.option("--days", default=30, show_default=True, type=click.IntRange(min=1), help="Window for tool-call counts.")
+@click.option("--never-read", is_flag=True, help="Also list live memories nobody has read.")
+@run_async
+async def stats(db: Path | None, days: int, never_read: bool) -> None:
+    """Tool-call and read counts, for pruning memories and judging the server's use.
+
+    Reads the database directly, so run it on the machine that hosts the store.
+    """
+    since = (date.fromisoformat(today()) - timedelta(days=days - 1)).isoformat()
+    async with Store(db or default_db_path()) as store:
+        usage = await store.usage(since)
+        reads = await store.read_counts()
+    click.echo(f"Tool calls since {since}:")
+    for u in usage:
+        click.echo(f"  {u['tool']:<14} {u['calls']}")
+    if not usage:
+        click.echo("  none")
+    read = [r for r in reads if r["count"] > 0]
+    click.echo(f"Live memories: {len(reads)}; read at least once: {len(read)}")
+    if read:
+        click.echo("Most read:")
+        for r in read[:10]:
+            click.echo(f"  {r['count']}  {r['scope']}/{r['name']}  last read {r['last_read_at'][:10]}")
+    if never_read:
+        click.echo("Never read:")
+        for r in reads:
+            if r["count"] == 0:
+                click.echo(f"  {r['scope']}/{r['name']}  updated {r['created_at'][:10]}")
+

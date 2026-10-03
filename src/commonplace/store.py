@@ -60,6 +60,19 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     id UNINDEXED, scope UNINDEXED, name, description, body,
     tokenize = 'porter unicode61'
 );
+CREATE TABLE IF NOT EXISTS reads (
+    scope        TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    count        INTEGER NOT NULL,
+    last_read_at TEXT NOT NULL,
+    PRIMARY KEY (scope, name)
+);
+CREATE TABLE IF NOT EXISTS usage (
+    day   TEXT NOT NULL,
+    tool  TEXT NOT NULL,
+    calls INTEGER NOT NULL,
+    PRIMARY KEY (day, tool)
+);
 """
 
 LIVE = "superseded_by IS NULL AND deleted_at IS NULL"
@@ -426,3 +439,44 @@ class Store:
                 "budget; merge or forget memories in this scope."
             )
         return warnings
+
+    async def note_call(self, tool: str) -> None:
+        """Count one call of an MCP tool for today."""
+        async with self._lock:
+            await self.db.execute(
+                "INSERT INTO usage (day, tool, calls) VALUES (?, ?, 1) "
+                "ON CONFLICT (day, tool) DO UPDATE SET calls = calls + 1",
+                (today(), tool),
+            )
+            await self.db.commit()
+
+    async def note_reads(self, keys: list[tuple[str, str]]) -> None:
+        """Count one read of each (scope, name)."""
+        if not keys:
+            return
+        now = _now()
+        async with self._lock:
+            await self.db.executemany(
+                "INSERT INTO reads (scope, name, count, last_read_at) VALUES (?, ?, 1, ?) "
+                "ON CONFLICT (scope, name) DO UPDATE SET count = count + 1, last_read_at = excluded.last_read_at",
+                [(scope, name, now) for scope, name in keys],
+            )
+            await self.db.commit()
+
+    async def usage(self, since: str) -> list[dict[str, Any]]:
+        """Tool calls per tool from `since` (YYYY-MM-DD) on, most-called first."""
+        cur = await self.db.execute(
+            "SELECT tool, SUM(calls) AS calls FROM usage WHERE day >= ? GROUP BY tool ORDER BY calls DESC, tool",
+            (since,),
+        )
+        return [dict(r) for r in await cur.fetchall()]
+
+    async def read_counts(self) -> list[dict[str, Any]]:
+        """Every live memory with how often it was read, most-read first."""
+        cur = await self.db.execute(
+            "SELECT m.scope, m.name, m.created_at, COALESCE(r.count, 0) AS count, r.last_read_at "
+            "FROM memories m LEFT JOIN reads r ON r.scope = m.scope AND r.name = m.name "
+            "WHERE m.superseded_by IS NULL AND m.deleted_at IS NULL "
+            "ORDER BY count DESC, m.scope, m.name"
+        )
+        return [dict(r) for r in await cur.fetchall()]

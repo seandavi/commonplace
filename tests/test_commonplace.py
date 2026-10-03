@@ -217,7 +217,8 @@ def test_migration_adds_expires_column(tmp_path: Path):
             m = await s.get(scope=G, name="old")
             assert m is not None and m.expires_at is None
             cols = {r["name"] for r in await (await s.db.execute("PRAGMA table_info(memories)")).fetchall()}
-        assert "expires_at" in cols
+            tables = {r[0] for r in await (await s.db.execute("SELECT name FROM sqlite_master")).fetchall()}
+        assert "expires_at" in cols and {"reads", "usage"} <= tables
 
     asyncio.run(check())
 
@@ -343,6 +344,27 @@ async def test_mcp_round_trip(mcp_store):
         assert f"`{P}`" in idx and f"## {P}" not in idx  # scope named, empty section omitted
         hits = (await c.call_tool("recall", {"query": "polars"})).data
         assert hits[0]["name"] == "polars"
+
+
+def test_usage_and_reads(mcp_store):
+    async def scenario():
+        async with Client(server.mcp) as c:
+            await c.call_tool(
+                "remember", {"scope": G, "name": "x", "type": "user", "description": "d", "body": "b", "agent": "t"}
+            )
+            await c.call_tool("get", {"scope": G, "name": "x"})
+            await c.call_tool("recall", {"query": "x"})
+            await c.call_tool("memory_index", {"scopes": [G]})
+        usage = {u["tool"]: u["calls"] for u in await mcp_store.usage("2000-01-01")}
+        assert usage == {"remember": 1, "get": 1, "recall": 1, "memory_index": 1}
+        assert [(r["name"], r["count"]) for r in await mcp_store.read_counts()] == [("x", 2)]
+        await server.close_store()
+
+    asyncio.run(scenario())
+    out = CliRunner().invoke(main, ["stats", "--never-read"])
+    assert out.exit_code == 0, out.output
+    assert "Tool calls since" in out.output and "Most read:" in out.output
+    assert "2  global/x" in out.output
 
 
 def test_cli_import_and_index(mcp_store, tmp_path: Path):

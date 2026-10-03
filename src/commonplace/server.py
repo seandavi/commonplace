@@ -7,6 +7,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
+from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 
 from commonplace.store import Memory, Store, StoreError
 from commonplace.store import today as utc_today
@@ -78,6 +79,17 @@ async def get_store() -> Store:
         _store = Store()
     await _store.open()
     return _store
+
+
+class UsageMiddleware(Middleware):
+    """Count tool calls per day: data for pruning and for judging whether the server earns its keep."""
+
+    async def on_call_tool(self, context: MiddlewareContext, call_next: CallNext) -> Any:
+        await (await get_store()).note_call(getattr(context.message, "name", "unknown"))
+        return await call_next(context)
+
+
+mcp.add_middleware(UsageMiddleware())
 
 
 def render_index(memories: list[Memory], scopes: list[str] | None = None, today: str | None = None) -> str:
@@ -191,6 +203,7 @@ async def get(scope: str, name: str) -> dict[str, Any]:
     m = await _run(store.get(scope=scope, name=name))
     if m is None:
         raise ToolError(f"no memory {scope}/{name}")
+    await store.note_reads([(m.scope, m.name)])
     return m.to_dict()
 
 
@@ -208,7 +221,9 @@ async def recall(
         limit: Maximum results.
     """
     store = await get_store()
-    return await _run(store.recall(query, scopes=scopes, type=type, limit=limit))
+    hits = await _run(store.recall(query, scopes=scopes, type=type, limit=limit))
+    await store.note_reads([(h["scope"], h["name"]) for h in hits])
+    return hits
 
 
 @mcp.tool
