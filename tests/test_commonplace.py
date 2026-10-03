@@ -523,6 +523,8 @@ def test_remote_cli_round_trip(remote_server: str):
     out = cli("update", G, "q", "--body", "-", input='Still "quoted", now updated')
     assert out.exit_code == 0 and "updated global/q" in out.output, out.output
     assert "global/q" in cli("recall", "quoted").output
+    idx = cli("index", "--scope", G, "--instructions")
+    assert idx.output.startswith("commonplace is shared, durable memory"), idx.output
     missing = cli("get", G, "missing")
     assert missing.exit_code == 1 and "no memory global/missing" in missing.output
     assert '"scope": "global"' in cli("call", "list_scopes").output

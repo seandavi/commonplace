@@ -81,9 +81,12 @@ def serve(use_http: bool, host: str, port: int) -> None:
 @click.option("--cwd", default=".", type=click.Path(file_okay=False), help="Directory to derive the project scope from.")
 @click.option("--strict", is_flag=True, help="Fail loudly if the server is unreachable (default: print nothing).")
 @click.option("--hook", "as_hook", is_flag=True, help="Emit SessionStart hook JSON (Claude Code, Codex) instead of markdown.")
+@click.option("--instructions", is_flag=True, help="Prefix the server's rules for agents (its MCP instructions).")
 @click.pass_context
 @run_async
-async def index(ctx: click.Context, scopes: tuple[str, ...], cwd: str, strict: bool, as_hook: bool) -> None:
+async def index(
+    ctx: click.Context, scopes: tuple[str, ...], cwd: str, strict: bool, as_hook: bool, instructions: bool
+) -> None:
     """Print the memory index for a session. Built for session-start hooks.
 
     Unless --strict, an unreachable server prints nothing and exits 0, so a
@@ -93,6 +96,8 @@ async def index(ctx: click.Context, scopes: tuple[str, ...], cwd: str, strict: b
     try:
         async with connect(ctx.obj["url"]) as conn:
             text = await conn.call("memory_index", {"scopes": wanted})
+            if instructions:
+                text = "\n\n".join(p for p in (conn.instructions.strip(), text) if p)
     except Exception as e:
         if strict:
             raise
