@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -186,6 +188,64 @@ async def test_index_budget_warning(store: Store, monkeypatch):
     assert any("over the 40-character budget" in w for w in await store.write_warnings(m))
 
 
+def test_migration_adds_expires_column(tmp_path: Path):
+    old = tmp_path / "old.db"
+    con = sqlite3.connect(old)
+    con.executescript(
+        """
+        CREATE TABLE memories (
+            id            TEXT PRIMARY KEY,
+            scope         TEXT NOT NULL,
+            name          TEXT NOT NULL,
+            type          TEXT NOT NULL CHECK (type IN ('user', 'feedback', 'project', 'reference')),
+            description   TEXT NOT NULL,
+            body          TEXT NOT NULL,
+            author        TEXT NOT NULL,
+            created_at    TEXT NOT NULL,
+            superseded_by TEXT,
+            deleted_at    TEXT,
+            deleted_by    TEXT
+        );
+        INSERT INTO memories (id, scope, name, type, description, body, author, created_at)
+        VALUES ('1', 'global', 'old', 'user', 'd', 'b', 't', '2026-01-01T00:00:00+00:00');
+        """
+    )
+    con.close()
+
+    async def check():
+        async with Store(old) as s:
+            m = await s.get(scope=G, name="old")
+            assert m is not None and m.expires_at is None
+            cols = {r["name"] for r in await (await s.db.execute("PRAGMA table_info(memories)")).fetchall()}
+            tables = {r[0] for r in await (await s.db.execute("SELECT name FROM sqlite_master")).fetchall()}
+        assert "expires_at" in cols and {"reads", "usage"} <= tables
+
+    asyncio.run(check())
+
+
+async def test_expiry(store: Store, monkeypatch):
+    tomorrow = (datetime.now(UTC).date() + timedelta(days=1)).isoformat()
+    await add(store, "temp", description="temporary tailnet fact", expires=tomorrow)
+    assert [m.name for m in await store.index()] == ["temp"]
+    assert [h["name"] for h in await store.recall("tailnet")] == ["temp"]
+    for bad in ["2020-01-01", "tomorrow", "2026-1-5"]:
+        with pytest.raises(StoreError, match="invalid expires"):
+            await add(store, "bad", expires=bad)
+    monkeypatch.setattr("commonplace.store.today", lambda: "2999-01-01")
+    assert await store.index() == [] and await store.recall("tailnet") == []
+    assert (await store.get(scope=G, name="temp")).expires_at == tomorrow
+    await store.update(scope=G, name="temp", expires="", author="t")
+    assert [m.name for m in await store.index()] == ["temp"]
+
+
+def test_index_label():
+    proj = Memory("1", P, "omicidx", "project", "ETL", "b", "t", "2026-09-01T00:00:00+00:00", "2026-12-31")
+    fb = Memory("2", G, "use-uv", "feedback", "Use uv", "b", "t", "2026-01-01T00:00:00+00:00")
+    idx = server.render_index([proj, fb], today="2026-09-11")
+    assert "**omicidx** (project, 10d, expires 2026-12-31) — ETL" in idx
+    assert "**use-uv** (feedback) — Use uv" in idx
+
+
 # --- scope -----------------------------------------------------------------
 
 
@@ -284,6 +344,27 @@ async def test_mcp_round_trip(mcp_store):
         assert f"`{P}`" in idx and f"## {P}" not in idx  # scope named, empty section omitted
         hits = (await c.call_tool("recall", {"query": "polars"})).data
         assert hits[0]["name"] == "polars"
+
+
+def test_usage_and_reads(mcp_store):
+    async def scenario():
+        async with Client(server.mcp) as c:
+            await c.call_tool(
+                "remember", {"scope": G, "name": "x", "type": "user", "description": "d", "body": "b", "agent": "t"}
+            )
+            await c.call_tool("get", {"scope": G, "name": "x"})
+            await c.call_tool("recall", {"query": "x"})
+            await c.call_tool("memory_index", {"scopes": [G]})
+        usage = {u["tool"]: u["calls"] for u in await mcp_store.usage("2000-01-01")}
+        assert usage == {"remember": 1, "get": 1, "recall": 1, "memory_index": 1}
+        assert [(r["name"], r["count"]) for r in await mcp_store.read_counts()] == [("x", 2)]
+        await server.close_store()
+
+    asyncio.run(scenario())
+    out = CliRunner().invoke(main, ["stats", "--never-read"])
+    assert out.exit_code == 0, out.output
+    assert "Tool calls since" in out.output and "Most read:" in out.output
+    assert "2  global/x" in out.output
 
 
 def test_cli_import_and_index(mcp_store, tmp_path: Path):

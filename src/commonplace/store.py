@@ -18,7 +18,7 @@ import re
 import sqlite3
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS memories (
     created_at    TEXT NOT NULL,
     superseded_by TEXT,
     deleted_at    TEXT,
-    deleted_by    TEXT
+    deleted_by    TEXT,
+    expires_at    TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS memories_live
     ON memories (scope, name)
@@ -59,10 +60,25 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     id UNINDEXED, scope UNINDEXED, name, description, body,
     tokenize = 'porter unicode61'
 );
+CREATE TABLE IF NOT EXISTS reads (
+    scope        TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    count        INTEGER NOT NULL,
+    last_read_at TEXT NOT NULL,
+    PRIMARY KEY (scope, name)
+);
+CREATE TABLE IF NOT EXISTS usage (
+    day   TEXT NOT NULL,
+    tool  TEXT NOT NULL,
+    calls INTEGER NOT NULL,
+    PRIMARY KEY (day, tool)
+);
 """
 
 LIVE = "superseded_by IS NULL AND deleted_at IS NULL"
-COLUMNS = "id, scope, name, type, description, body, author, created_at"
+# Bind to today(): a memory drops out on its expiry date.
+VISIBLE = "(expires_at IS NULL OR expires_at > ?)"
+COLUMNS = "id, scope, name, type, description, body, author, created_at, expires_at"
 
 
 class StoreError(ValueError):
@@ -79,6 +95,7 @@ class Memory:
     body: str
     author: str
     created_at: str
+    expires_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -93,6 +110,21 @@ def default_db_path() -> Path:
 
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def today() -> str:
+    """Today's UTC date, YYYY-MM-DD."""
+    return datetime.now(UTC).date().isoformat()
+
+
+def _check_expires(expires: str) -> str:
+    try:
+        ok = date.fromisoformat(expires).isoformat() == expires and expires > today()
+    except ValueError:
+        ok = False
+    if not ok:
+        raise StoreError(f"invalid expires {expires!r}: use a date after today, as YYYY-MM-DD")
+    return expires
 
 
 def check_scope(scope: str) -> str:
@@ -169,6 +201,9 @@ class Store:
         self._db.row_factory = aiosqlite.Row
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.executescript(SCHEMA)
+        cur = await self._db.execute("PRAGMA table_info(memories)")
+        if "expires_at" not in {r["name"] for r in await cur.fetchall()}:
+            await self._db.execute("ALTER TABLE memories ADD COLUMN expires_at TEXT")
         await self._db.commit()
 
     async def close(self) -> None:
@@ -192,8 +227,8 @@ class Store:
 
     async def _insert(self, m: Memory) -> None:
         await self.db.execute(
-            f"INSERT INTO memories ({COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (m.id, m.scope, m.name, m.type, m.description, m.body, m.author, m.created_at),
+            f"INSERT INTO memories ({COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (m.id, m.scope, m.name, m.type, m.description, m.body, m.author, m.created_at, m.expires_at),
         )
         await self.db.execute(
             "INSERT INTO memories_fts (id, scope, name, description, body) VALUES (?, ?, ?, ?, ?)",
@@ -201,7 +236,15 @@ class Store:
         )
 
     async def remember(
-        self, *, scope: str, name: str, type: str, description: str, body: str, author: str
+        self,
+        *,
+        scope: str,
+        name: str,
+        type: str,
+        description: str,
+        body: str,
+        author: str,
+        expires: str | None = None,
     ) -> Memory:
         """Create a new memory. Fails if a live memory already has this name in scope."""
         check_scope(scope)
@@ -209,10 +252,13 @@ class Store:
         if not description.strip() or not author.strip():
             raise StoreError("description and author are required")
         _check_body(body)
+        expires_at = _check_expires(expires) if expires else None
         async with self._lock:
             if await self._live(scope, name):
                 raise StoreError(f"{scope}/{name} already exists; use update to change it")
-            m = Memory(uuid.uuid4().hex, scope, name, type, description.strip(), body.strip(), author, _now())
+            m = Memory(
+                uuid.uuid4().hex, scope, name, type, description.strip(), body.strip(), author, _now(), expires_at
+            )
             try:
                 await self._insert(m)
                 await self.db.commit()
@@ -230,12 +276,18 @@ class Store:
         description: str | None = None,
         body: str | None = None,
         type: str | None = None,
+        expires: str | None = None,
     ) -> Memory:
-        """Supersede a live memory with a new version; unspecified fields carry over."""
+        """Supersede a live memory with a new version; unspecified fields carry over.
+
+        `expires`: None keeps the current date, "" clears it.
+        """
         check_scope(scope)
         _check(name, type)
         if body is not None:  # carried-over bodies stay updatable even if oversized
             _check_body(body)
+        if expires:
+            _check_expires(expires)
         async with self._lock:
             old = await self._live(scope, name)
             if old is None:
@@ -249,6 +301,7 @@ class Store:
                 (body if body is not None else old.body).strip(),
                 author,
                 _now(),
+                old.expires_at if expires is None else (expires or None),
             )
             try:
                 await self.db.execute("UPDATE memories SET superseded_by = ? WHERE id = ?", (new.id, old.id))
@@ -291,12 +344,12 @@ class Store:
         if not match:
             return []
         sql = (
-            f"SELECT m.id, m.scope, m.name, m.type, m.description, m.body, m.author, m.created_at, "
+            f"SELECT m.id, m.scope, m.name, m.type, m.description, m.body, m.author, m.created_at, m.expires_at, "
             f"bm25(memories_fts, 0, 0, 5.0, 3.0, 1.0) AS score "
             f"FROM memories_fts JOIN memories m ON m.id = memories_fts.id "
-            f"WHERE memories_fts MATCH ?"
+            f"WHERE memories_fts MATCH ? AND {VISIBLE}"
         )
-        params: list[Any] = [match]
+        params: list[Any] = [match, today()]
         if scopes:
             for s in scopes:
                 check_scope(s)
@@ -311,10 +364,13 @@ class Store:
         cur = await self.db.execute(sql, params)
         return [dict(r) for r in await cur.fetchall()]
 
-    async def index(self, scopes: list[str] | None = None) -> list[Memory]:
+    async def index(self, scopes: list[str] | None = None, *, include_expired: bool = False) -> list[Memory]:
         """All live memories in the given scopes (all scopes if None), for session-start context."""
         sql = f"SELECT {COLUMNS} FROM memories WHERE {LIVE}"
         params: list[Any] = []
+        if not include_expired:
+            sql += f" AND {VISIBLE}"
+            params.append(today())
         if scopes:
             for s in scopes:
                 check_scope(s)
@@ -336,7 +392,9 @@ class Store:
 
     async def scopes(self) -> list[dict[str, Any]]:
         cur = await self.db.execute(
-            f"SELECT scope, COUNT(*) AS count FROM memories WHERE {LIVE} GROUP BY scope ORDER BY scope"
+            f"SELECT scope, COUNT(*) AS count FROM memories WHERE {LIVE} AND {VISIBLE} "
+            "GROUP BY scope ORDER BY scope",
+            (today(),),
         )
         return [dict(r) for r in await cur.fetchall()]
 
@@ -348,9 +406,9 @@ class Store:
         cur = await self.db.execute(
             "SELECT m.id, m.name, bm25(memories_fts, 0, 0, 5.0, 3.0, 1.0) AS score "
             "FROM memories_fts JOIN memories m ON m.id = memories_fts.id "
-            "WHERE memories_fts MATCH ? AND m.scope = ? "
+            f"WHERE memories_fts MATCH ? AND m.scope = ? AND {VISIBLE} "
             "ORDER BY score LIMIT 10",
-            (q, m.scope),
+            (q, m.scope, today()),
         )
         rows = await cur.fetchall()
         self_score = next((r["score"] for r in rows if r["id"] == m.id), None)
@@ -362,8 +420,8 @@ class Store:
         """Approximate size of a scope's index lines, in characters."""
         cur = await self.db.execute(
             "SELECT COALESCE(SUM(length(name) + length(type) + length(description) + 12), 0) "
-            f"FROM memories WHERE scope = ? AND {LIVE}",
-            (scope,),
+            f"FROM memories WHERE scope = ? AND {LIVE} AND {VISIBLE}",
+            (scope, today()),
         )
         return (await cur.fetchone())[0]
 
@@ -381,3 +439,44 @@ class Store:
                 "budget; merge or forget memories in this scope."
             )
         return warnings
+
+    async def note_call(self, tool: str) -> None:
+        """Count one call of an MCP tool for today."""
+        async with self._lock:
+            await self.db.execute(
+                "INSERT INTO usage (day, tool, calls) VALUES (?, ?, 1) "
+                "ON CONFLICT (day, tool) DO UPDATE SET calls = calls + 1",
+                (today(), tool),
+            )
+            await self.db.commit()
+
+    async def note_reads(self, keys: list[tuple[str, str]]) -> None:
+        """Count one read of each (scope, name)."""
+        if not keys:
+            return
+        now = _now()
+        async with self._lock:
+            await self.db.executemany(
+                "INSERT INTO reads (scope, name, count, last_read_at) VALUES (?, ?, 1, ?) "
+                "ON CONFLICT (scope, name) DO UPDATE SET count = count + 1, last_read_at = excluded.last_read_at",
+                [(scope, name, now) for scope, name in keys],
+            )
+            await self.db.commit()
+
+    async def usage(self, since: str) -> list[dict[str, Any]]:
+        """Tool calls per tool from `since` (YYYY-MM-DD) on, most-called first."""
+        cur = await self.db.execute(
+            "SELECT tool, SUM(calls) AS calls FROM usage WHERE day >= ? GROUP BY tool ORDER BY calls DESC, tool",
+            (since,),
+        )
+        return [dict(r) for r in await cur.fetchall()]
+
+    async def read_counts(self) -> list[dict[str, Any]]:
+        """Every live memory with how often it was read, most-read first."""
+        cur = await self.db.execute(
+            "SELECT m.scope, m.name, m.created_at, COALESCE(r.count, 0) AS count, r.last_read_at "
+            "FROM memories m LEFT JOIN reads r ON r.scope = m.scope AND r.name = m.name "
+            "WHERE m.superseded_by IS NULL AND m.deleted_at IS NULL "
+            "ORDER BY count DESC, m.scope, m.name"
+        )
+        return [dict(r) for r in await cur.fetchall()]
