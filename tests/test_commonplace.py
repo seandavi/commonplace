@@ -12,7 +12,7 @@ from commonplace import server
 from commonplace.cli import main
 from commonplace.importers import _decode_by_walking, _encode, claude_project_path, parse_claude_memory, slugify
 from commonplace.scope import host_name, normalize_remote, project_scope, session_scopes
-from commonplace.store import Memory, Store, StoreError, fts_query
+from commonplace.store import Memory, Store, StoreError, fts_query, max_body_chars
 
 G = "global"
 P = "project:github.com/seandavi/vault-mcp"
@@ -137,6 +137,53 @@ async def test_index_and_scopes(store: Store):
     assert [m.name for m in await store.index([G])] == ["b"]
     assert [m.name for m in await store.index()] == ["b", "a"]
     assert await store.scopes() == [{"scope": G, "count": 1}, {"scope": P, "count": 1}]
+
+
+async def test_body_limit(store: Store, monkeypatch):
+    monkeypatch.setenv("COMMONPLACE_MAX_BODY", "10")
+    await add(store, "ten", body="0123456789")
+    with pytest.raises(StoreError, match="limit is 10"):
+        await add(store, "eleven", body="01234567890")
+    monkeypatch.setenv("COMMONPLACE_MAX_BODY", "5")
+    await store.update(scope=G, name="ten", description="new", author="t")  # carried-over body not checked
+    with pytest.raises(StoreError, match="limit is 5"):
+        await store.update(scope=G, name="ten", body="123456", author="t")
+
+
+def test_max_body_from_config_file(tmp_path: Path, monkeypatch):
+    from commonplace import config
+
+    cfg = tmp_path / "config.toml"
+    cfg.write_text("max_body = 7\n")
+    monkeypatch.setenv("COMMONPLACE_CONFIG", str(cfg))
+    monkeypatch.delenv("COMMONPLACE_MAX_BODY", raising=False)
+    config._file.cache_clear()
+    assert max_body_chars() == 7
+
+
+async def test_similar_warning(store: Store):
+    for name, description, body in [
+        ("use-uv", "Use uv for Python packaging", "uv everywhere"),
+        ("polars", "Use polars for dataframes, not pandas", "polars"),
+        ("just-runner", "Use just as the task runner, not make", "justfile"),
+        ("tailnet-auth", "Tailscale is the only auth layer for internal services", "tailnet"),
+        ("quarto-builtins", "Prefer Quarto built-in classes before custom CSS", "quarto"),
+        ("svg-figures", "Generate SVG figures with legends for docs", "figures"),
+        ("gcp-secret-manager", "Keep app secrets in GCP Secret Manager", "All app credentials live in GCP Secret Manager."),
+    ]:
+        await add(store, name, description=description, body=body)
+    dup = await add(store, "secrets-in-secret-manager",
+                    description="App secrets belong in GCP Secret Manager, not scattered files", body="body")
+    warnings = await store.write_warnings(dup)
+    assert any(w.startswith("Similar memories already in global: gcp-secret-manager") for w in warnings)
+    other = await add(store, "ruff-loose", description="Run ruff with a loose rule set", body="body")
+    assert not any(w.startswith("Similar") for w in await store.write_warnings(other))
+
+
+async def test_index_budget_warning(store: Store, monkeypatch):
+    monkeypatch.setattr("commonplace.store.INDEX_BUDGET_CHARS", 40)
+    m = await add(store, "budget", description="long enough to exceed a tiny index budget")
+    assert any("over the 40-character budget" in w for w in await store.write_warnings(m))
 
 
 # --- scope -----------------------------------------------------------------

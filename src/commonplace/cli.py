@@ -22,7 +22,7 @@ from commonplace.config import setting
 from commonplace.importers import claude_memory_files, claude_project_path, parse_claude_memory
 from commonplace.scope import host_name, project_scope, session_scopes
 from commonplace.server import close_store, mcp
-from commonplace.store import TYPES, Store, default_db_path
+from commonplace.store import TYPES, Store, default_db_path, max_body_chars
 
 
 def _client(ctx: click.Context) -> Client:
@@ -77,6 +77,10 @@ def main(ctx: click.Context, url: str | None) -> None:
 @click.option("--port", default=9322, show_default=True)
 def serve(use_http: bool, host: str, port: int) -> None:
     """Run the MCP server against the local database."""
+    try:
+        max_body_chars()
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
     if use_http:
         mcp.run(transport="http", host=host, port=port, show_banner=False)
     else:
@@ -189,6 +193,8 @@ async def remember(
         ctx, "remember", scope=scope_, name=name, type=type_, description=description, body=body, agent=agent
     )
     click.echo(f"remembered {m['scope']}/{m['name']}")
+    for w in m.get("warnings", []):
+        click.echo(f"warning: {w}", err=True)
 
 
 @main.command()
