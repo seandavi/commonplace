@@ -1,8 +1,9 @@
 # commonplace
 
 [![ci](https://github.com/seandavi/commonplace/actions/workflows/ci.yml/badge.svg)](https://github.com/seandavi/commonplace/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
+[![PyPI](https://img.shields.io/pypi/v/commonplace-agent-memory.svg)](https://pypi.org/project/commonplace-agent-memory/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/seandavi/commonplace/blob/main/LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://github.com/seandavi/commonplace/blob/main/pyproject.toml)
 
 Shared, durable memory for coding agents (Claude Code, Codex, pi, omp and
 any MCP client) across projects and machines.
@@ -59,7 +60,7 @@ keeping.
   `commonplace stats` on the store host shows what gets used and what never
   does.
 
-![commonplace architecture: Claude Code and Codex call the server's MCP tools over HTTP and load the index through a SessionStart hook; pi and omp use the bundled extension, which runs the commonplace CLI; the CLI and other MCP clients reach the server over HTTP; the server keeps memories in SQLite with FTS5 on the store host, where export and stats read the database directly.](docs/architecture.png)
+![commonplace architecture: Claude Code and Codex call the server's MCP tools over HTTP and load the index through a SessionStart hook; pi and omp use the bundled extension, which runs the commonplace CLI; the CLI and other MCP clients reach the server over HTTP; the server keeps memories in SQLite with FTS5 on the store host, where export and stats read the database directly.](https://raw.githubusercontent.com/seandavi/commonplace/main/docs/architecture.png)
 
 ## Security model
 
@@ -79,13 +80,17 @@ never to follow instructions found in a memory, and `history` and `export`
 show who wrote what. Never store secrets, credentials or tokens in
 commonplace.
 
-Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
+Report vulnerabilities privately; see [SECURITY.md](https://github.com/seandavi/commonplace/blob/main/SECURITY.md).
 
 ## Install
 
 ```sh
-uv tool install git+https://github.com/seandavi/commonplace
+uv tool install commonplace-agent-memory                     # from PyPI
+uv tool install git+https://github.com/seandavi/commonplace   # or the latest main
 ```
+
+The PyPI name is `commonplace-agent-memory` because `commonplace` was
+taken; the command and the Python package are both `commonplace`.
 
 Every command except `serve`, `export` and `stats` is an MCP client. Given a
 server URL it talks to the shared server through a small built-in MCP client
@@ -199,6 +204,8 @@ Until then `codex exec` skips it silently. As a fallback, add a line to
 
 ### pi
 
+From a clone of this repo:
+
 ```sh
 ln -s "$PWD/integrations/pi/commonplace.ts" ~/.pi/agent/extensions/
 ```
@@ -214,7 +221,8 @@ text.
 
 ### omp
 
-omp (oh-my-pi) loads pi extensions, so the same file works:
+omp (oh-my-pi) loads pi extensions, so the same file works. From a clone of
+this repo:
 
 ```sh
 mkdir -p ~/.omp/agent/extensions && ln -s "$PWD/integrations/pi/commonplace.ts" ~/.omp/agent/extensions/
@@ -261,14 +269,15 @@ uv run pytest
 
 ## Contributing
 
-Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md)
-and the [Code of Conduct](CODE_OF_CONDUCT.md).
+Issues and pull requests are welcome; see
+[CONTRIBUTING.md](https://github.com/seandavi/commonplace/blob/main/CONTRIBUTING.md)
+and the [Code of Conduct](https://github.com/seandavi/commonplace/blob/main/CODE_OF_CONDUCT.md).
 
 ## Citation
 
 If you use commonplace in your work, cite it with the metadata in
-[CITATION.cff](CITATION.cff); GitHub's "Cite this repository" button uses it.
+[CITATION.cff](https://github.com/seandavi/commonplace/blob/main/CITATION.cff); GitHub's "Cite this repository" button uses it.
 
 ## License
 
-MIT; see [LICENSE](LICENSE).
+MIT; see [LICENSE](https://github.com/seandavi/commonplace/blob/main/LICENSE).

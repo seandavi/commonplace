@@ -1,5 +1,7 @@
 [project]
-name = "commonplace"
+# PyPI's `commonplace` is an unrelated project; the import package and the
+# `commonplace` command keep the short name.
+name = "commonplace-agent-memory"
 version = "0.1.0"
 description = "Shared, durable memory for coding agents across projects and machines (MCP + CLI over SQLite)"
 readme = "README.md"
@@ -38,6 +40,9 @@ Issues = "https://github.com/seandavi/commonplace/issues"
 [build-system]
 requires = ["uv_build>=0.8.11,<0.9.0"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "commonplace"
 
 [dependency-groups]
 dev = [
