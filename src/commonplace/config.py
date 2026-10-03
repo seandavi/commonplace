@@ -1,7 +1,8 @@
 """Per-machine defaults: ~/.config/commonplace/config.toml.
 
-    url = "http://100.74.53.55:9322/mcp"   # shared server; omit to use the local DB
-    host = "macbook"                       # name for this machine's host: scope
+    url = "http://<tailscale-ip>:9322/mcp"   # shared server; omit to use the local DB
+    host = "my-laptop"                       # name for this machine's host: scope
+    max_body = 4000   # server host only: longest memory body, in characters
 
 Environment variables (COMMONPLACE_URL, COMMONPLACE_HOST) override the file,
 so agents and hooks need no environment plumbing of their own.
@@ -28,7 +29,7 @@ def _file() -> dict[str, str]:
         data = tomllib.loads(config_path().read_text())
     except FileNotFoundError:
         return {}
-    return {k: str(v) for k, v in data.items() if isinstance(v, str)}
+    return {k: str(v) for k, v in data.items() if isinstance(v, (str, int)) and not isinstance(v, bool)}
 
 
 def setting(key: str) -> str | None:

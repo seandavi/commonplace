@@ -12,7 +12,7 @@ from commonplace import server
 from commonplace.cli import main
 from commonplace.importers import _decode_by_walking, _encode, claude_project_path, parse_claude_memory, slugify
 from commonplace.scope import host_name, normalize_remote, project_scope, session_scopes
-from commonplace.store import Memory, Store, StoreError, fts_query
+from commonplace.store import Memory, Store, StoreError, fts_query, max_body_chars
 
 G = "global"
 P = "project:github.com/seandavi/vault-mcp"
@@ -137,6 +137,29 @@ async def test_index_and_scopes(store: Store):
     assert [m.name for m in await store.index([G])] == ["b"]
     assert [m.name for m in await store.index()] == ["b", "a"]
     assert await store.scopes() == [{"scope": G, "count": 1}, {"scope": P, "count": 1}]
+
+
+async def test_body_limit(store: Store, monkeypatch):
+    monkeypatch.setenv("COMMONPLACE_MAX_BODY", "10")
+    await add(store, "ten", body="0123456789")
+    with pytest.raises(StoreError, match="limit is 10"):
+        await add(store, "eleven", body="01234567890")
+    monkeypatch.setenv("COMMONPLACE_MAX_BODY", "5")
+    await store.update(scope=G, name="ten", description="new", author="t")  # carried-over body not checked
+    with pytest.raises(StoreError, match="limit is 5"):
+        await store.update(scope=G, name="ten", body="123456", author="t")
+
+
+def test_max_body_from_config_file(tmp_path: Path, monkeypatch):
+    from commonplace import config
+
+    cfg = tmp_path / "config.toml"
+    cfg.write_text("max_body = 7\n")
+    monkeypatch.setenv("COMMONPLACE_CONFIG", str(cfg))
+    monkeypatch.delenv("COMMONPLACE_MAX_BODY", raising=False)
+    config._file.cache_clear()
+    assert max_body_chars() == 7
+
 
 
 # --- scope -----------------------------------------------------------------

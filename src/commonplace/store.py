@@ -24,9 +24,13 @@ from typing import Any
 
 import aiosqlite
 
+from commonplace.config import setting
+
 TYPES = ("user", "feedback", "project", "reference")
 SCOPE_RE = re.compile(r"^(global|host:[a-z0-9][a-z0-9.-]*|project:[a-z0-9][a-z0-9._/-]*)$")
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")
+
+DEFAULT_MAX_BODY = 4000
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -111,6 +115,29 @@ def fts_query(text: str) -> str:
     return " OR ".join(f'"{t}"' for t in dict.fromkeys(terms))
 
 
+def max_body_chars() -> int:
+    """Longest allowed memory body: `max_body` setting, else DEFAULT_MAX_BODY."""
+    raw = setting("max_body")
+    if raw is None:
+        return DEFAULT_MAX_BODY
+    try:
+        limit = int(raw)
+    except ValueError:
+        limit = 0
+    if limit <= 0:
+        raise ValueError(f"max_body must be a positive integer, got {raw!r}")
+    return limit
+
+
+def _check_body(body: str) -> None:
+    n, limit = len(body.strip()), max_body_chars()
+    if n > limit:
+        raise StoreError(
+            f"body is {n} characters; the limit is {limit}. "
+            "Shorten it, or point to a file, URL or issue that holds the details."
+        )
+
+
 class Store:
     """Async access to the memory database. Use as an async context manager."""
 
@@ -176,6 +203,7 @@ class Store:
         _check(name, type)
         if not description.strip() or not author.strip():
             raise StoreError("description and author are required")
+        _check_body(body)
         async with self._lock:
             if await self._live(scope, name):
                 raise StoreError(f"{scope}/{name} already exists; use update to change it")
@@ -201,6 +229,8 @@ class Store:
         """Supersede a live memory with a new version; unspecified fields carry over."""
         check_scope(scope)
         _check(name, type)
+        if body is not None:  # carried-over bodies stay updatable even if oversized
+            _check_body(body)
         async with self._lock:
             old = await self._live(scope, name)
             if old is None:
