@@ -180,17 +180,26 @@ async def get(ctx: click.Context, scope_: str, name: str, as_json: bool) -> None
 @click.option("--description", required=True)
 @click.option("--body", default="-", help="Body text, or - to read stdin.")
 @click.option("--agent", default=None, help="Author to record. Default: cli@<host>.")
+@click.option("--expires", default=None, help="YYYY-MM-DD after today; from then the memory leaves the index and recall.")
 @click.pass_context
 @run_async
 async def remember(
-    ctx: click.Context, scope_: str, name: str, type_: str, description: str, body: str, agent: str
+    ctx: click.Context,
+    scope_: str,
+    name: str,
+    type_: str,
+    description: str,
+    body: str,
+    agent: str,
+    expires: str | None,
 ) -> None:
     """Save a new memory."""
     if body == "-":
         body = sys.stdin.read()
     agent = agent or f"cli@{host_name()}"
     m = await _call(
-        ctx, "remember", scope=scope_, name=name, type=type_, description=description, body=body, agent=agent
+        ctx, "remember", scope=scope_, name=name, type=type_, description=description, body=body, agent=agent,
+        expires=expires,
     )
     click.echo(f"remembered {m['scope']}/{m['name']}")
     for w in m.get("warnings", []):
@@ -280,17 +289,17 @@ async def export(out_dir: Path, db: Path | None) -> None:
     """Write live memories as markdown files (one per memory) for review or git.
 
     Reads the database directly, so run it on the machine that hosts the store.
+    Expired memories are included, with their `expires` date.
     """
     async with Store(db or default_db_path()) as store:
-        memories = await store.index()
+        memories = await store.index(include_expired=True)
     for m in memories:
         folder = out_dir / m.scope.replace(":", "/")
         folder.mkdir(parents=True, exist_ok=True)
-        front = "\n".join(
-            f"{k}: {json.dumps(v)}"
-            for k, v in [("name", m.name), ("description", m.description), ("type", m.type),
-                         ("scope", m.scope), ("author", m.author), ("updated", m.created_at)]
-        )
+        fields = [("name", m.name), ("description", m.description), ("type", m.type),
+                  ("scope", m.scope), ("author", m.author), ("updated", m.created_at)]
+        if m.expires_at:
+            fields.append(("expires", m.expires_at))
+        front = "\n".join(f"{k}: {json.dumps(v)}" for k, v in fields)
         (folder / f"{m.name}.md").write_text(f"---\n{front}\n---\n\n{m.body}\n")
     click.echo(f"exported {len(memories)} memories to {out_dir}")
-

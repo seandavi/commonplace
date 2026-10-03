@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -184,6 +186,63 @@ async def test_index_budget_warning(store: Store, monkeypatch):
     monkeypatch.setattr("commonplace.store.INDEX_BUDGET_CHARS", 40)
     m = await add(store, "budget", description="long enough to exceed a tiny index budget")
     assert any("over the 40-character budget" in w for w in await store.write_warnings(m))
+
+
+def test_migration_adds_expires_column(tmp_path: Path):
+    old = tmp_path / "old.db"
+    con = sqlite3.connect(old)
+    con.executescript(
+        """
+        CREATE TABLE memories (
+            id            TEXT PRIMARY KEY,
+            scope         TEXT NOT NULL,
+            name          TEXT NOT NULL,
+            type          TEXT NOT NULL CHECK (type IN ('user', 'feedback', 'project', 'reference')),
+            description   TEXT NOT NULL,
+            body          TEXT NOT NULL,
+            author        TEXT NOT NULL,
+            created_at    TEXT NOT NULL,
+            superseded_by TEXT,
+            deleted_at    TEXT,
+            deleted_by    TEXT
+        );
+        INSERT INTO memories (id, scope, name, type, description, body, author, created_at)
+        VALUES ('1', 'global', 'old', 'user', 'd', 'b', 't', '2026-01-01T00:00:00+00:00');
+        """
+    )
+    con.close()
+
+    async def check():
+        async with Store(old) as s:
+            m = await s.get(scope=G, name="old")
+            assert m is not None and m.expires_at is None
+            cols = {r["name"] for r in await (await s.db.execute("PRAGMA table_info(memories)")).fetchall()}
+        assert "expires_at" in cols
+
+    asyncio.run(check())
+
+
+async def test_expiry(store: Store, monkeypatch):
+    tomorrow = (datetime.now(UTC).date() + timedelta(days=1)).isoformat()
+    await add(store, "temp", description="temporary tailnet fact", expires=tomorrow)
+    assert [m.name for m in await store.index()] == ["temp"]
+    assert [h["name"] for h in await store.recall("tailnet")] == ["temp"]
+    for bad in ["2020-01-01", "tomorrow", "2026-1-5"]:
+        with pytest.raises(StoreError, match="invalid expires"):
+            await add(store, "bad", expires=bad)
+    monkeypatch.setattr("commonplace.store.today", lambda: "2999-01-01")
+    assert await store.index() == [] and await store.recall("tailnet") == []
+    assert (await store.get(scope=G, name="temp")).expires_at == tomorrow
+    await store.update(scope=G, name="temp", expires="", author="t")
+    assert [m.name for m in await store.index()] == ["temp"]
+
+
+def test_index_label():
+    proj = Memory("1", P, "omicidx", "project", "ETL", "b", "t", "2026-09-01T00:00:00+00:00", "2026-12-31")
+    fb = Memory("2", G, "use-uv", "feedback", "Use uv", "b", "t", "2026-01-01T00:00:00+00:00")
+    idx = server.render_index([proj, fb], today="2026-09-11")
+    assert "**omicidx** (project, 10d, expires 2026-12-31) — ETL" in idx
+    assert "**use-uv** (feedback) — Use uv" in idx
 
 
 # --- scope -----------------------------------------------------------------
