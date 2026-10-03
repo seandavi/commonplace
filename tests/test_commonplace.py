@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
+import socket
 import sqlite3
 import subprocess
+import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -471,3 +476,60 @@ def test_cli_import_infer_scope(mcp_store, tmp_path: Path):
 
 def test_instructions_rule_out_personal_judgments():
     assert "never personal judgments" in server.INSTRUCTIONS
+
+
+def test_cli_import_skips_fastmcp():
+    """Hooks and extensions start the CLI per call; fastmcp's import alone costs ~0.7 s."""
+    code = "import commonplace.cli, sys; sys.exit('fastmcp' in sys.modules)"
+    assert subprocess.run([sys.executable, "-c", code]).returncode == 0
+
+
+@pytest.fixture
+def remote_server(tmp_path: Path):
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    env = {**os.environ, "COMMONPLACE_DB": str(tmp_path / "remote.db"), "COMMONPLACE_CONFIG": str(tmp_path / "none.toml")}
+    proc = subprocess.Popen(
+        ["uv", "run", "commonplace", "serve", "--http", "--host", "127.0.0.1", "--port", str(port)],
+        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.monotonic() + 20
+        while True:
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+                break
+            except OSError:
+                if time.monotonic() > deadline or proc.poll() is not None:
+                    pytest.fail(f"commonplace serve never listened on port {port}")
+                time.sleep(0.2)
+        yield f"http://127.0.0.1:{port}/mcp"
+    finally:
+        proc.terminate()
+        proc.wait(10)
+
+
+def test_remote_cli_round_trip(remote_server: str):
+    r = CliRunner()
+
+    def cli(*args: str, input: str | None = None):
+        return r.invoke(main, ["--url", remote_server, *args], input=input)
+
+    body = 'It\'s a "quoted" `tick` $HOME line'
+    out = cli("remember", "--scope", G, "--name", "q", "--type", "reference", "--description", "Quote test", input=body)
+    assert out.exit_code == 0, out.output
+    assert json.loads(cli("get", G, "q", "--json").stdout)["body"] == body
+    out = cli("update", G, "q", "--body", "-", input='Still "quoted", now updated')
+    assert out.exit_code == 0 and "updated global/q" in out.output, out.output
+    assert "global/q" in cli("recall", "quoted").output
+    idx = cli("index", "--scope", G, "--instructions")
+    assert idx.output.startswith("commonplace is shared, durable memory"), idx.output
+    missing = cli("get", G, "missing")
+    assert missing.exit_code == 1 and "no memory global/missing" in missing.output
+    assert '"scope": "global"' in cli("call", "list_scopes").output
+
+
+def test_cli_update_requires_a_field(mcp_store):
+    out = CliRunner().invoke(main, ["update", G, "x"])
+    assert out.exit_code == 2 and "nothing to update" in out.output
