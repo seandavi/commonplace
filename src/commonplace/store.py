@@ -12,8 +12,10 @@ to leave the tailnet.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
+import sqlite3
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -115,6 +117,9 @@ class Store:
     def __init__(self, path: Path | str | None = None) -> None:
         self.path = Path(path) if path is not None else default_db_path()
         self._db: aiosqlite.Connection | None = None
+        # All writes share one connection: a commit from one coroutine would
+        # otherwise commit another's half-done transaction.
+        self._lock = asyncio.Lock()
 
     async def __aenter__(self) -> Store:
         await self.open()
@@ -171,11 +176,16 @@ class Store:
         _check(name, type)
         if not description.strip() or not author.strip():
             raise StoreError("description and author are required")
-        if await self._live(scope, name):
-            raise StoreError(f"{scope}/{name} already exists; use update to change it")
-        m = Memory(uuid.uuid4().hex, scope, name, type, description.strip(), body.strip(), author, _now())
-        await self._insert(m)
-        await self.db.commit()
+        async with self._lock:
+            if await self._live(scope, name):
+                raise StoreError(f"{scope}/{name} already exists; use update to change it")
+            m = Memory(uuid.uuid4().hex, scope, name, type, description.strip(), body.strip(), author, _now())
+            try:
+                await self._insert(m)
+                await self.db.commit()
+            except sqlite3.IntegrityError as e:
+                await self.db.rollback()
+                raise StoreError(f"{scope}/{name} already exists; use update to change it") from e
         return m
 
     async def update(
@@ -191,36 +201,42 @@ class Store:
         """Supersede a live memory with a new version; unspecified fields carry over."""
         check_scope(scope)
         _check(name, type)
-        old = await self._live(scope, name)
-        if old is None:
-            raise StoreError(f"no live memory {scope}/{name}")
-        new = Memory(
-            uuid.uuid4().hex,
-            scope,
-            name,
-            type or old.type,
-            (description or old.description).strip(),
-            (body if body is not None else old.body).strip(),
-            author,
-            _now(),
-        )
-        await self.db.execute("UPDATE memories SET superseded_by = ? WHERE id = ?", (new.id, old.id))
-        await self.db.execute("DELETE FROM memories_fts WHERE id = ?", (old.id,))
-        await self._insert(new)
-        await self.db.commit()
+        async with self._lock:
+            old = await self._live(scope, name)
+            if old is None:
+                raise StoreError(f"no live memory {scope}/{name}")
+            new = Memory(
+                uuid.uuid4().hex,
+                scope,
+                name,
+                type or old.type,
+                (description or old.description).strip(),
+                (body if body is not None else old.body).strip(),
+                author,
+                _now(),
+            )
+            try:
+                await self.db.execute("UPDATE memories SET superseded_by = ? WHERE id = ?", (new.id, old.id))
+                await self.db.execute("DELETE FROM memories_fts WHERE id = ?", (old.id,))
+                await self._insert(new)
+                await self.db.commit()
+            except sqlite3.IntegrityError as e:
+                await self.db.rollback()
+                raise StoreError(f"{scope}/{name} changed during the update; get it again and retry") from e
         return new
 
     async def forget(self, *, scope: str, name: str, author: str) -> Memory:
         """Soft-delete a live memory. It stays in history."""
         check_scope(scope)
-        old = await self._live(scope, name)
-        if old is None:
-            raise StoreError(f"no live memory {scope}/{name}")
-        await self.db.execute(
-            "UPDATE memories SET deleted_at = ?, deleted_by = ? WHERE id = ?", (_now(), author, old.id)
-        )
-        await self.db.execute("DELETE FROM memories_fts WHERE id = ?", (old.id,))
-        await self.db.commit()
+        async with self._lock:
+            old = await self._live(scope, name)
+            if old is None:
+                raise StoreError(f"no live memory {scope}/{name}")
+            await self.db.execute(
+                "UPDATE memories SET deleted_at = ?, deleted_by = ? WHERE id = ?", (_now(), author, old.id)
+            )
+            await self.db.execute("DELETE FROM memories_fts WHERE id = ?", (old.id,))
+            await self.db.commit()
         return old
 
     async def get(self, *, scope: str, name: str) -> Memory | None:
