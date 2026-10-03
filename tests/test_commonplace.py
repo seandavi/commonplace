@@ -188,10 +188,19 @@ def test_parse_claude_memory(tmp_path: Path):
     f.write_text("---\nname: user_role\ndescription: Who the user is\nmetadata:\n  type: user\n---\n\nA scientist.\n")
     m = parse_claude_memory(f)
     assert (m.name, m.type, m.description, m.body) == ("user-role", "user", "Who the user is", "A scientist.")
+    assert m.warning is None
     (tmp_path / "MEMORY.md").write_text("- index")
     assert parse_claude_memory(tmp_path / "MEMORY.md") is None
     (tmp_path / "plain.md").write_text("no frontmatter")
     assert parse_claude_memory(tmp_path / "plain.md") is None
+
+
+def test_parse_claude_memory_keeps_hash(tmp_path: Path):
+    f = tmp_path / "issues.md"
+    f.write_text("---\nname: issues\ndescription: Iterate in issues (e.g. #64 for X), then promote\ntype: feedback\n---\nb\n")
+    m = parse_claude_memory(f)
+    assert m.description == "Iterate in issues (e.g. #64 for X), then promote"
+    assert m.warning is not None
 
 
 def test_slugify():
