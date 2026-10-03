@@ -31,6 +31,10 @@ SCOPE_RE = re.compile(r"^(global|host:[a-z0-9][a-z0-9.-]*|project:[a-z0-9][a-z0-
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")
 
 DEFAULT_MAX_BODY = 4000
+# A neighbour is "similar" when its BM25 score against the new memory's name and
+# description is at least this fraction of the memory's own score. Calibrated on
+# the live store: known duplicates score 0.47-0.61, and 0.45 flags about 18% of memories.
+SIMILAR_RATIO = 0.45
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -334,3 +338,31 @@ class Store:
             f"SELECT scope, COUNT(*) AS count FROM memories WHERE {LIVE} GROUP BY scope ORDER BY scope"
         )
         return [dict(r) for r in await cur.fetchall()]
+
+    async def similar(self, m: Memory, limit: int = 3) -> list[str]:
+        """Names of other live memories in m's scope that look like the same fact."""
+        q = fts_query(m.name.replace("-", " ") + " " + m.description)
+        if not q:
+            return []
+        cur = await self.db.execute(
+            "SELECT m.id, m.name, bm25(memories_fts, 0, 0, 5.0, 3.0, 1.0) AS score "
+            "FROM memories_fts JOIN memories m ON m.id = memories_fts.id "
+            "WHERE memories_fts MATCH ? AND m.scope = ? "
+            "ORDER BY score LIMIT 10",
+            (q, m.scope),
+        )
+        rows = await cur.fetchall()
+        self_score = next((r["score"] for r in rows if r["id"] == m.id), None)
+        if not self_score:
+            return []
+        return [r["name"] for r in rows if r["id"] != m.id and r["score"] / self_score >= SIMILAR_RATIO][:limit]
+
+    async def write_warnings(self, m: Memory) -> list[str]:
+        """Warnings for the agent that just wrote m: likely duplicates."""
+        warnings = []
+        if names := await self.similar(m):
+            warnings.append(
+                f"Similar memories already in {m.scope}: {', '.join(names)}. If one of them covers "
+                f"this fact, update it instead and forget {m.scope}/{m.name}."
+            )
+        return warnings

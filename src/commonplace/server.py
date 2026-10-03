@@ -107,10 +107,12 @@ async def remember(
         body: The fact itself. For feedback and project memories, follow it
             with **Why:** and **How to apply:** lines.
         agent: Your agent name, recorded as the author.
+
+    Returns the memory plus `warnings` naming similar memories in the scope.
     """
     store = await get_store()
     m = await _run(store.remember(scope=scope, name=name, type=type, description=description, body=body, author=agent))
-    return m.to_dict()
+    return {**m.to_dict(), "warnings": await store.write_warnings(m)}
 
 
 @mcp.tool
@@ -124,13 +126,14 @@ async def update(
 ) -> dict[str, Any]:
     """Replace a memory with a new version. Omitted fields keep their current value.
 
-    The previous version is kept in history, never lost.
+    The previous version is kept in history, never lost. Returns the new
+    version plus `warnings`, as for `remember`.
     """
     store = await get_store()
     m = await _run(
         store.update(scope=scope, name=name, author=agent, description=description, body=body, type=type)
     )
-    return m.to_dict()
+    return {**m.to_dict(), "warnings": await store.write_warnings(m)}
 
 
 @mcp.tool

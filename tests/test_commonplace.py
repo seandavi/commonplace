@@ -161,6 +161,25 @@ def test_max_body_from_config_file(tmp_path: Path, monkeypatch):
     assert max_body_chars() == 7
 
 
+async def test_similar_warning(store: Store):
+    for name, description, body in [
+        ("use-uv", "Use uv for Python packaging", "uv everywhere"),
+        ("polars", "Use polars for dataframes, not pandas", "polars"),
+        ("just-runner", "Use just as the task runner, not make", "justfile"),
+        ("tailnet-auth", "Tailscale is the only auth layer for internal services", "tailnet"),
+        ("quarto-builtins", "Prefer Quarto built-in classes before custom CSS", "quarto"),
+        ("svg-figures", "Generate SVG figures with legends for docs", "figures"),
+        ("gcp-secret-manager", "Keep app secrets in GCP Secret Manager", "All app credentials live in GCP Secret Manager."),
+    ]:
+        await add(store, name, description=description, body=body)
+    dup = await add(store, "secrets-in-secret-manager",
+                    description="App secrets belong in GCP Secret Manager, not scattered files", body="body")
+    warnings = await store.write_warnings(dup)
+    assert any(w.startswith("Similar memories already in global: gcp-secret-manager") for w in warnings)
+    other = await add(store, "ruff-loose", description="Run ruff with a loose rule set", body="body")
+    assert not any(w.startswith("Similar") for w in await store.write_warnings(other))
+
+
 
 # --- scope -----------------------------------------------------------------
 

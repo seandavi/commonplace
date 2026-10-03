@@ -193,6 +193,8 @@ async def remember(
         ctx, "remember", scope=scope_, name=name, type=type_, description=description, body=body, agent=agent
     )
     click.echo(f"remembered {m['scope']}/{m['name']}")
+    for w in m.get("warnings", []):
+        click.echo(f"warning: {w}", err=True)
 
 
 @main.command()
