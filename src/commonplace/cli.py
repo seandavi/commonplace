@@ -1,8 +1,10 @@
 """`commonplace` command line: run the server, and read/write memory from hooks and scripts.
 
-Every read/write command is an MCP client. With COMMONPLACE_URL (or --url)
-set it talks to the shared server over HTTP; otherwise it runs the server
-in-process against the local database. One code path either way.
+Read/write commands are MCP clients of the same tools every agent uses. With a
+server URL (--url, COMMONPLACE_URL or the config file) they talk to the shared
+server through a small built-in MCP client, so hooks and extensions that start
+the CLI per call stay fast. Without one they run the server in-process against
+the local database. `serve`, `export` and `stats` work on the local database.
 """
 
 from __future__ import annotations
@@ -16,41 +18,25 @@ from pathlib import Path
 from typing import Any
 
 import click
-from fastmcp import Client
-from fastmcp.exceptions import ToolError
 
+from commonplace.client import RemoteError, ToolCallError, connect
 from commonplace.config import setting
 from commonplace.importers import claude_memory_files, claude_project_path, parse_claude_memory
 from commonplace.scope import host_name, project_scope, session_scopes
-from commonplace.server import close_store, mcp
 from commonplace.store import TYPES, Store, default_db_path, max_body_chars, today
 
 
-def _client(ctx: click.Context) -> Client:
-    url = ctx.obj.get("url")
-    return Client(url) if url else Client(mcp)
-
-
 async def _call(ctx: click.Context, tool: str, **args: Any) -> Any:
-    async with _client(ctx) as client:
-        result = await client.call_tool(tool, {k: v for k, v in args.items() if v is not None})
-        return result.data
+    async with connect(ctx.obj["url"]) as conn:
+        return await conn.call(tool, args)
 
 
 def run_async(f: Any) -> Any:
     @wraps(f)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        async def main() -> Any:
-            try:
-                return await f(*args, **kwargs)
-            finally:
-                # aiosqlite runs a non-daemon thread; an open connection
-                # would keep the process alive after the command finishes.
-                await close_store()
-
         try:
-            return asyncio.run(main())
-        except ToolError as e:
+            return asyncio.run(f(*args, **kwargs))
+        except (ToolCallError, RemoteError) as e:
             raise click.ClickException(str(e)) from e
 
     return wrapper
@@ -78,6 +64,8 @@ def main(ctx: click.Context, url: str | None) -> None:
 @click.option("--port", default=9322, show_default=True)
 def serve(use_http: bool, host: str, port: int) -> None:
     """Run the MCP server against the local database."""
+    from commonplace.server import mcp
+
     try:
         max_body_chars()
     except ValueError as e:
@@ -103,7 +91,8 @@ async def index(ctx: click.Context, scopes: tuple[str, ...], cwd: str, strict: b
     """
     wanted = list(scopes) or await session_scopes(cwd)
     try:
-        text = await _call(ctx, "memory_index", scopes=wanted)
+        async with connect(ctx.obj["url"]) as conn:
+            text = await conn.call("memory_index", {"scopes": wanted})
     except Exception as e:
         if strict:
             raise
@@ -254,7 +243,7 @@ async def import_claude(
             scopes[project_dir] = await project_scope(path) if path else None
         return scopes[project_dir]
 
-    async with _client(ctx) as client:
+    async with connect(ctx.obj["url"]) as conn:
         for f in claude_memory_files(list(paths)):
             m = parse_claude_memory(f)
             if m is None:
@@ -268,18 +257,21 @@ async def import_claude(
                 if m.warning:
                     click.echo(f"  warning: {m.warning}")
                 continue
-            existing = await client.call_tool("get", {"scope": scope, "name": m.name}, raise_on_error=False)
-            if not existing.is_error:
+            try:
+                await conn.call("get", {"scope": scope, "name": m.name})
+            except ToolCallError:
+                pass  # not there yet: import it
+            else:
                 click.echo(f"skip {scope}/{m.name} (exists)")
                 continue
-            await client.call_tool(
+            saved = await conn.call(
                 "remember",
                 {"scope": scope, "name": m.name, "type": m.type, "description": m.description,
                  "body": m.body, "agent": agent},
             )
             click.echo(f"imported {scope}/{m.name}")
-            if m.warning:
-                click.echo(f"  warning: {m.warning}")
+            for w in ([m.warning] if m.warning else []) + saved.get("warnings", []):
+                click.echo(f"  warning: {w}")
 
 
 _DB_OPTION = click.option(
