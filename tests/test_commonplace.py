@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import subprocess
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from commonplace import server
 from commonplace.cli import main
 from commonplace.importers import _decode_by_walking, _encode, claude_project_path, parse_claude_memory, slugify
 from commonplace.scope import host_name, normalize_remote, project_scope, session_scopes
-from commonplace.store import Store, StoreError, fts_query
+from commonplace.store import Memory, Store, StoreError, fts_query
 
 G = "global"
 P = "project:github.com/seandavi/vault-mcp"
@@ -56,6 +57,14 @@ async def test_duplicate_name_in_scope_rejected_but_other_scope_ok(store: Store)
     with pytest.raises(StoreError, match="already exists"):
         await add(store, "x")
     await add(store, "x", scope=P)
+
+
+async def test_concurrent_remember_same_name(store: Store):
+    results = await asyncio.gather(add(store, "x"), add(store, "x"), return_exceptions=True)
+    assert sum(isinstance(r, Memory) for r in results) == 1
+    errors = [r for r in results if not isinstance(r, Memory)]
+    assert len(errors) == 1 and isinstance(errors[0], StoreError)
+    assert "already exists" in str(errors[0])
 
 
 @pytest.mark.parametrize(
@@ -179,10 +188,19 @@ def test_parse_claude_memory(tmp_path: Path):
     f.write_text("---\nname: user_role\ndescription: Who the user is\nmetadata:\n  type: user\n---\n\nA scientist.\n")
     m = parse_claude_memory(f)
     assert (m.name, m.type, m.description, m.body) == ("user-role", "user", "Who the user is", "A scientist.")
+    assert m.warning is None
     (tmp_path / "MEMORY.md").write_text("- index")
     assert parse_claude_memory(tmp_path / "MEMORY.md") is None
     (tmp_path / "plain.md").write_text("no frontmatter")
     assert parse_claude_memory(tmp_path / "plain.md") is None
+
+
+def test_parse_claude_memory_keeps_hash(tmp_path: Path):
+    f = tmp_path / "issues.md"
+    f.write_text("---\nname: issues\ndescription: Iterate in issues (e.g. #64 for X), then promote\ntype: feedback\n---\nb\n")
+    m = parse_claude_memory(f)
+    assert m.description == "Iterate in issues (e.g. #64 for X), then promote"
+    assert m.warning is not None
 
 
 def test_slugify():

@@ -11,6 +11,9 @@ import yaml
 
 from commonplace.store import TYPES
 
+# Top-level, unquoted, non-block description line: YAML would cut it at ' #'.
+_RAW_DESCRIPTION = re.compile(r"^description:[ \t]*(?P<raw>[^'\"|>\s].*?)[ \t]*$", re.M)
+
 
 @dataclass(frozen=True)
 class ImportedMemory:
@@ -19,6 +22,7 @@ class ImportedMemory:
     description: str
     body: str
     source: Path
+    warning: str | None = None
 
 
 def slugify(text: str) -> str:
@@ -48,12 +52,18 @@ def parse_claude_memory(path: Path) -> ImportedMemory | None:
     description = str(meta.get("description") or "").strip()
     if type_ not in TYPES or not description:
         return None
+    warning = None
+    raw = _RAW_DESCRIPTION.search(m.group(1))
+    if raw and " #" in raw["raw"] and raw["raw"] != description:
+        description = raw["raw"]
+        warning = "description contains ' #', which YAML reads as a comment; kept the whole line"
     return ImportedMemory(
         name=slugify(str(meta.get("name") or path.stem)),
         type=type_,
         description=description,
         body=m.group(2).strip(),
         source=path,
+        warning=warning,
     )
 
 

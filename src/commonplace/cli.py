@@ -249,6 +249,8 @@ async def import_claude(
                 continue
             if dry_run:
                 click.echo(f"would import {scope}/{m.name} ({m.type}) — {m.description[:90]} ← {f}")
+                if m.warning:
+                    click.echo(f"  warning: {m.warning}")
                 continue
             existing = await client.call_tool("get", {"scope": scope, "name": m.name}, raise_on_error=False)
             if not existing.is_error:
@@ -260,6 +262,8 @@ async def import_claude(
                  "body": m.body, "agent": agent},
             )
             click.echo(f"imported {scope}/{m.name}")
+            if m.warning:
+                click.echo(f"  warning: {m.warning}")
 
 
 @main.command()
