@@ -1,7 +1,7 @@
 """Per-machine defaults: ~/.config/commonplace/config.toml.
 
-    url = "http://<tailscale-ip>:9322/mcp"   # shared server; omit to use the local DB
-    host = "my-laptop"                       # name for this machine's host: scope
+    url = "http://<server-address>:9322/mcp"   # shared server; omit to use the local DB
+    host = "my-laptop"                         # name for this machine's host: scope
     max_body = 4000   # server host only: longest memory body, in characters
 
 Environment variables (COMMONPLACE_URL, COMMONPLACE_HOST) override the file,

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  LaunchAgent for the commonplace tailnet HTTP server (see README → Serving
-  the tailnet). Runs deploy/commonplace-tailnet.sh, which binds this
+  LaunchAgent for the commonplace tailnet HTTP server (see README → Running
+  the shared server). Runs deploy/commonplace-tailnet.sh, which binds this
   machine's Tailscale IP on port 9322. No app-level auth: Tailscale is the
   auth layer. Install with:
     sed "s|__HOME__|$HOME|g" deploy/commonplace.plist > ~/Library/LaunchAgents/io.github.seandavi.commonplace.plist

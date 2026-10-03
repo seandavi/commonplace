@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {"title": "commonplace architecture", "quality_profile": "showcase", "legend": {"mode": "hidden"}},
+  "components": [
+    {"id": "claude-codex", "type": "frontend", "label": "Claude Code · Codex", "sublabel": "MCP + SessionStart hook", "pos": [80, 100], "size": [180, 64]},
+    {"id": "pi-omp", "type": "frontend", "label": "pi · omp", "sublabel": "bundled extension", "pos": [80, 260], "size": [180, 64]},
+    {"id": "other-mcp", "type": "external", "label": "Other MCP clients", "sublabel": "streamable HTTP", "pos": [80, 420], "size": [180, 64]},
+    {"id": "cli", "type": "backend", "label": "commonplace CLI", "sublabel": "built-in MCP client", "pos": [360, 260], "size": [180, 64], "tag": "config.toml"},
+    {"id": "server", "type": "backend", "label": "commonplace serve", "sublabel": "FastMCP · HTTP :9322", "pos": [660, 260], "size": [190, 64], "tag": "write guards"},
+    {"id": "sqlite", "type": "database", "label": "SQLite + FTS5", "sublabel": "versioned memories", "pos": [940, 260], "size": [170, 64]},
+    {"id": "store-cli", "type": "backend", "label": "export · stats", "sublabel": "store-host CLI", "pos": [940, 420], "size": [170, 64]}
+  ],
+  "boundaries": [
+    {"kind": "region", "label": "Client machines", "wraps": ["claude-codex", "pi-omp", "other-mcp", "cli"]},
+    {"kind": "region", "label": "Store host: any address the clients can reach (often a tailnet)", "wraps": ["server", "sqlite", "store-cli"]}
+  ],
+  "connections": [
+    {"id": "pi-omp-to-cli", "from": "pi-omp", "to": "cli", "label": "memory_* tools", "variant": "emphasis"},
+    {"id": "cli-to-server", "from": "cli", "to": "server", "label": "MCP over HTTP", "variant": "emphasis"},
+    {"id": "server-to-sqlite", "from": "server", "to": "sqlite", "label": "aiosqlite", "variant": "emphasis"},
+    {"id": "claude-codex-to-server", "from": "claude-codex", "to": "server", "label": "MCP over HTTP", "fromSide": "right", "toSide": "top"},
+    {"id": "claude-codex-hook", "from": "claude-codex", "to": "cli", "label": "index --hook", "variant": "dashed", "fromSide": "bottom", "toSide": "top"},
+    {"id": "other-mcp-to-server", "from": "other-mcp", "to": "server", "label": "MCP over HTTP", "fromSide": "right", "toSide": "bottom"},
+    {"id": "store-cli-to-sqlite", "from": "store-cli", "to": "sqlite", "label": "direct read", "variant": "dashed"}
+  ],
+  "cards": [
+    {"dot": "cyan", "title": "Clients", "items": ["Claude Code and Codex call the MCP tools; a SessionStart hook loads the index", "pi and omp load the bundled extension, which runs the CLI"]},
+    {"dot": "emerald", "title": "Server", "items": ["One FastMCP server, one SQLite file", "Updates add versions; forget is a soft delete"]},
+    {"dot": "rose", "title": "Network", "items": ["Clients only need to reach the server's host and port", "A Tailscale tailnet is the usual way; there is no app-level auth"]}
+  ]
+}
