@@ -2,6 +2,7 @@
 
 [![ci](https://github.com/seandavi/commonplace/actions/workflows/ci.yml/badge.svg)](https://github.com/seandavi/commonplace/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
 
 Shared, durable memory for coding agents (Claude Code, Codex, pi, omp and
 any MCP client) across projects and machines.
@@ -63,6 +64,21 @@ Codex ───────┼────────────────�
 pi, omp ─────┘  extension → commonplace CLI        (one machine on the tailnet)
 ```
 
+## Security model
+
+commonplace has no authentication of its own. Run the HTTP server only on a
+network you trust: the deployment scripts in `deploy/` bind it to the
+machine's Tailscale address, so only devices on your tailnet can reach it.
+Anyone who can reach the port can read, write and forget every memory.
+
+Memories are text that other agents load into their context. Treat them as
+untrusted data: the server instructions and the session index tell agents
+never to follow instructions found in a memory, and `history` and `export`
+show who wrote what. Never store secrets, credentials or tokens in
+commonplace.
+
+Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
+
 ## Install
 
 ```sh
@@ -109,8 +125,8 @@ commonplace stats --days 30          # tool calls, most-read and never-read memo
 On the machine that holds the store:
 
 ```sh
-cp deploy/com.seandavis.commonplace.plist ~/Library/LaunchAgents/   # edit paths first
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.seandavis.commonplace.plist
+sed "s|__HOME__|$HOME|g" deploy/commonplace.plist > ~/Library/LaunchAgents/io.github.seandavi.commonplace.plist   # assumes ~/Documents/git/commonplace
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.github.seandavi.commonplace.plist
 ```
 
 `deploy/commonplace-tailnet.sh` binds the machine's Tailscale IP on port
@@ -120,7 +136,7 @@ tailnet can reach it.
 > **macOS privacy (TCC):** launchd jobs have no access to `~/Documents`. If
 > the repo lives there, grant Full Disk Access to `/bin/sh` (System Settings
 > → Privacy & Security → Full Disk Access), then
-> `launchctl kickstart -k gui/$(id -u)/com.seandavis.commonplace`.
+> `launchctl kickstart -k gui/$(id -u)/io.github.seandavi.commonplace`.
 
 On Linux, use the systemd user unit instead: `deploy/commonplace.service`
 (install steps are in its header).
@@ -231,3 +247,17 @@ uv run pytest
   For now agents write memories deliberately through the tools.
 - A review queue for memories written by agents other than you.
 - Moving the store off the tailnet (OAuth on the server, or D1).
+
+## Contributing
+
+Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md)
+and the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Citation
+
+If you use commonplace in your work, cite it with the metadata in
+[CITATION.cff](CITATION.cff); GitHub's "Cite this repository" button uses it.
+
+## License
+
+MIT; see [LICENSE](LICENSE).

@@ -18,7 +18,7 @@ Wants=network-online.target
 [Service]
 Environment=COMMONPLACE_REPO=%h/Documents/git/commonplace
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/bin/sh %h/Documents/git/commonplace/deploy/commonplace-tailnet.sh
+ExecStart=/bin/sh ${COMMONPLACE_REPO}/deploy/commonplace-tailnet.sh
 Restart=always
 RestartSec=5
 

@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use commonplace in your work, please cite it as below."
+type: software
+title: "commonplace: shared, durable memory for coding agents"
+authors:
+  - family-names: Davis
+    given-names: Sean
+    orcid: "https://orcid.org/0000-0002-8991-6458"
+    email: seandavi@gmail.com
+repository-code: "https://github.com/seandavi/commonplace"
+license: MIT
+version: 0.1.0
+keywords:
+  - ai-agents
+  - agent-memory
+  - mcp
+  - claude-code
+  - codex
+  - sqlite
+abstract: >-
+  A small server and CLI that give coding agents (Claude Code, Codex, pi,
+  omp and any MCP client) one shared memory across projects and machines.
+  Memories are short, typed, versioned records in SQLite with full-text
+  search, scoped to the user, a machine or a git repository. Agents get a
+  one-line-per-memory index at session start and fetch full text on demand.
