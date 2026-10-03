@@ -84,31 +84,67 @@ Report vulnerabilities privately; see [SECURITY.md](https://github.com/seandavi/
 
 ## Install
 
+commonplace needs Python 3.12 or newer. It is published on PyPI as
+[`commonplace-agent-memory`](https://pypi.org/project/commonplace-agent-memory/)
+because the name `commonplace` was taken; the command it installs and the
+Python package are both `commonplace`.
+
+Install it on every machine whose agents should share memory, including the
+machine that will hold the store. [uv](https://docs.astral.sh/uv/) installs
+it as a standalone tool with its own environment:
+
 ```sh
-uv tool install commonplace-agent-memory                     # from PyPI
-uv tool install git+https://github.com/seandavi/commonplace   # or the latest main
+uv tool install commonplace-agent-memory
+commonplace --help
 ```
 
-The PyPI name is `commonplace-agent-memory` because `commonplace` was
-taken; the command and the Python package are both `commonplace`.
+`pipx install commonplace-agent-memory` works the same way, and so does
+`pip install commonplace-agent-memory` inside a virtual environment. For
+changes that aren't released yet, install from GitHub instead:
+`uv tool install git+https://github.com/seandavi/commonplace`.
+
+### Set up each machine
+
+1. **Start the server** on the machine that will hold the store; see
+   [Running the shared server](#running-the-shared-server).
+2. **Point the CLI at it.** Per-machine settings live in
+   `~/.config/commonplace/config.toml`, so hooks and agents need no
+   environment plumbing:
+
+   ```toml
+   url = "http://<server-address>:9322/mcp"   # the shared server
+   host = "macbook"                           # this machine's host: scope name
+   max_body = 4000                            # server host only: longest memory body, in characters
+   ```
+
+   `COMMONPLACE_URL`, `COMMONPLACE_HOST` and `COMMONPLACE_MAX_BODY`
+   override the file. Without a `url`, the CLI uses a local database
+   (`~/.local/share/commonplace/memory.db`, or `$COMMONPLACE_DB`), which is
+   enough to try commonplace on one machine.
+3. **Check the connection.** `commonplace scope` prints the scopes a session
+   in the current directory sees; `commonplace index --strict` fetches the
+   index and fails loudly if the server can't be reached.
+4. **Connect your agents**; see [Connecting agents](#connecting-agents).
+
+### Upgrade and uninstall
+
+```sh
+uv tool upgrade commonplace-agent-memory
+uv tool uninstall commonplace-agent-memory
+```
+
+The scripts in `deploy/` run the server from a clone of this repo, so on the
+store host update the clone (`git pull`) and restart the service. A new
+version may migrate the database the first time the server opens it; back
+it up first (`sqlite3 ~/.local/share/commonplace/memory.db ".backup memory-backup.db"`).
+
+### Commands
 
 Every command except `serve`, `export` and `stats` is an MCP client. Given a
 server URL it talks to the shared server through a small built-in MCP client
 (fast enough for hooks that run it on every session); without one it runs the
-server in-process against the local database
-(`~/.local/share/commonplace/memory.db`, or `$COMMONPLACE_DB`). `export` and
-`stats` read the database directly, so run them on the store host.
-
-Per-machine settings live in `~/.config/commonplace/config.toml`, so hooks
-and agents need no environment plumbing:
-
-```toml
-url = "http://<server-address>:9322/mcp"   # the shared server
-host = "macbook"                           # this machine's host: scope name
-max_body = 4000                            # server host only: longest memory body, in characters
-```
-
-`COMMONPLACE_URL`, `COMMONPLACE_HOST` and `COMMONPLACE_MAX_BODY` override the file.
+server in-process against the local database. `export` and `stats` read the
+database directly, so run them on the store host.
 
 ```sh
 commonplace index                    # session index: global + this host + this repo's project scope
@@ -204,10 +240,18 @@ Until then `codex exec` skips it silently. As a fallback, add a line to
 
 ### pi
 
-From a clone of this repo:
+The extension is a single file that isn't part of the PyPI package. Symlink
+it from a clone of this repo, so `git pull` keeps it current:
 
 ```sh
 ln -s "$PWD/integrations/pi/commonplace.ts" ~/.pi/agent/extensions/
+```
+
+or download a copy:
+
+```sh
+curl -fsSL -o ~/.pi/agent/extensions/commonplace.ts \
+    https://raw.githubusercontent.com/seandavi/commonplace/main/integrations/pi/commonplace.ts
 ```
 
 At session start the extension loads the server's rules for agents and the
@@ -227,6 +271,9 @@ this repo:
 ```sh
 mkdir -p ~/.omp/agent/extensions && ln -s "$PWD/integrations/pi/commonplace.ts" ~/.omp/agent/extensions/
 ```
+
+or download a copy into `~/.omp/agent/extensions/` with the `curl` command
+above.
 
 The rules and the index are added to the system prompt on every turn, and
 writes record the author as `omp@<host>`. Don't also list the server in
