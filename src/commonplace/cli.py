@@ -199,6 +199,41 @@ async def remember(
 @main.command()
 @click.argument("scope_")
 @click.argument("name")
+@click.option("--description")
+@click.option("--type", "type_", type=click.Choice(TYPES))
+@click.option("--body", default=None, help="New body text, or - to read stdin. Omit to keep the current body.")
+@click.option("--expires", default=None, help="YYYY-MM-DD; an empty string clears it")
+@click.option("--agent", default=None, help="Author to record. Default: cli@<host>.")
+@click.pass_context
+@run_async
+async def update(
+    ctx: click.Context,
+    scope_: str,
+    name: str,
+    description: str | None,
+    type_: str | None,
+    body: str | None,
+    expires: str | None,
+    agent: str | None,
+) -> None:
+    """Replace a memory with a new version; omitted fields keep their value."""
+    if description is None and type_ is None and body is None and expires is None:
+        raise click.UsageError("nothing to update: give --description, --type, --body or --expires")
+    if body == "-":
+        body = sys.stdin.read()
+    agent = agent or f"cli@{host_name()}"
+    m = await _call(
+        ctx, "update", scope=scope_, name=name, agent=agent, description=description, type=type_, body=body,
+        expires=expires,
+    )
+    click.echo(f"updated {m['scope']}/{m['name']}")
+    for w in m.get("warnings", []):
+        click.echo(f"warning: {w}", err=True)
+
+
+@main.command()
+@click.argument("scope_")
+@click.argument("name")
 @click.option("--agent", default=None, help="Author to record. Default: cli@<host>.")
 @click.pass_context
 @run_async

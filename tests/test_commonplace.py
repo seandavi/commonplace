@@ -520,7 +520,14 @@ def test_remote_cli_round_trip(remote_server: str):
     out = cli("remember", "--scope", G, "--name", "q", "--type", "reference", "--description", "Quote test", input=body)
     assert out.exit_code == 0, out.output
     assert json.loads(cli("get", G, "q", "--json").stdout)["body"] == body
+    out = cli("update", G, "q", "--body", "-", input='Still "quoted", now updated')
+    assert out.exit_code == 0 and "updated global/q" in out.output, out.output
     assert "global/q" in cli("recall", "quoted").output
     missing = cli("get", G, "missing")
     assert missing.exit_code == 1 and "no memory global/missing" in missing.output
     assert '"scope": "global"' in cli("call", "list_scopes").output
+
+
+def test_cli_update_requires_a_field(mcp_store):
+    out = CliRunner().invoke(main, ["update", G, "x"])
+    assert out.exit_code == 2 and "nothing to update" in out.output
