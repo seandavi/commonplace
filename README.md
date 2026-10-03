@@ -63,15 +63,15 @@ keeping.
 
 ## Security model
 
-commonplace has no authentication of its own. The only network requirement
-is that clients can reach the server's address and port; anyone who can
-reach it can read, write and forget every memory. So bind the server to a
-network only your machines can reach. A [Tailscale](https://tailscale.com)
-tailnet is the common choice, and the scripts in `deploy/` bind the
-server to the machine's Tailscale address. A LAN behind a firewall, a
-WireGuard or other VPN, an SSH tunnel to a server bound to `127.0.0.1`, or
-a reverse proxy that adds TLS and authentication work too. Don't expose the
-port to the internet.
+commonplace currently has no authentication of its own, so it needs a
+private or otherwise secure network. A [Tailscale](https://tailscale.com)
+tailnet is the easy way to get one, and the scripts in `deploy/` bind the
+server to the machine's Tailscale address. Beyond that, the only network
+requirement is that clients can reach the server's address and port;
+anyone who can reach it can read, write and forget every memory. A LAN
+behind a firewall, a WireGuard or other VPN, an SSH tunnel to a server
+bound to `127.0.0.1`, or a reverse proxy that adds TLS and authentication
+work too. Don't expose the port to the internet.
 
 Memories are text that other agents load into their context. Treat them as
 untrusted data: the server instructions and the session index tell agents
@@ -125,8 +125,9 @@ commonplace stats --days 30          # tool calls, most-read and never-read memo
 ## Running the shared server
 
 On the machine that holds the store, bind the HTTP server to an address
-your clients can reach (the default, `127.0.0.1`, serves only that
-machine):
+your clients can reach on a private network (see
+[Security model](#security-model); the default, `127.0.0.1`, serves only
+that machine):
 
 ```sh
 commonplace serve --http --host <address> --port 9322
