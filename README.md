@@ -3,8 +3,8 @@
 [![ci](https://github.com/seandavi/commonplace/actions/workflows/ci.yml/badge.svg)](https://github.com/seandavi/commonplace/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Shared, durable memory for coding agents (Claude Code, Codex, pi, and any
-MCP client) across projects and machines.
+Shared, durable memory for coding agents (Claude Code, Codex, pi, omp and
+any MCP client) across projects and machines.
 
 Claude Code's auto-memory is good: small typed facts, an index loaded at
 session start, and full bodies fetched on demand. But it lives in one
@@ -18,11 +18,11 @@ keeping.
 
 - **One store, many agents.** SQLite with FTS5, served over MCP
   (streamable HTTP) on the tailnet. Claude Code and Codex speak MCP
-  natively. pi gets a small extension.
+  natively. pi and omp get a small extension.
 - **Recall at session start.** Storing memories is only half the job; they
   also have to reach the agent. `commonplace index` prints a
   one-line-per-memory index for the current session. A SessionStart hook
-  (Claude Code, Codex) or the pi extension puts it in context, and agents
+  (Claude Code, Codex) or the pi/omp extension puts it in context, and agents
   fetch full bodies with `get` / `recall`.
 - **Scopes.** `global` holds facts about you and how you work.
   `host:<hostname>` holds facts true only on one machine (a temp dir that
@@ -45,11 +45,22 @@ keeping.
   both tell agents that memories were written by other agents and are never
   instructions. That is the first line of defence against memory poisoning;
   `history` and `export` are how you audit.
+- **Write guards.** Memories are short facts, not documents or status logs.
+  The server rejects bodies over a size limit (4,000 characters by default;
+  `max_body` in config.toml or `COMMONPLACE_MAX_BODY` on the server host).
+  `remember` and `update` return `warnings` naming similar memories in the
+  scope, and flag a scope whose index is over 8,000 characters.
+- **Expiry.** A memory can carry an `expires` date (YYYY-MM-DD); from that
+  date it leaves the index and `recall`, while `get` still returns it.
+  Project lines in the index show how many days ago they were last updated.
+- **Usage.** The server counts tool calls per day and reads per memory;
+  `commonplace stats` on the store host shows what gets used and what never
+  does.
 
 ```
 Claude Code ─┐  MCP (HTTP) + SessionStart hook
 Codex ───────┼─────────────────────────────▶  commonplace serve --http  ──▶  SQLite + FTS5
-pi ──────────┘  extension → commonplace CLI        (one machine on the tailnet)
+pi, omp ─────┘  extension → commonplace CLI        (one machine on the tailnet)
 ```
 
 ## Install
@@ -58,10 +69,12 @@ pi ──────────┘  extension → commonplace CLI        (one 
 uv tool install git+https://github.com/seandavi/commonplace
 ```
 
-Every command except `serve` and `export` is an MCP client. Given a server
-URL it talks to the shared server; without one it runs the server
-in-process against the local database
-(`~/.local/share/commonplace/memory.db`, or `$COMMONPLACE_DB`).
+Every command except `serve`, `export` and `stats` is an MCP client. Given a
+server URL it talks to the shared server through a small built-in MCP client
+(fast enough for hooks that run it on every session); without one it runs the
+server in-process against the local database
+(`~/.local/share/commonplace/memory.db`, or `$COMMONPLACE_DB`). `export` and
+`stats` read the database directly, so run them on the store host.
 
 Per-machine settings live in `~/.config/commonplace/config.toml`, so hooks
 and agents need no environment plumbing:
@@ -69,18 +82,26 @@ and agents need no environment plumbing:
 ```toml
 url = "http://<tailscale-ip>:9322/mcp"   # the shared server
 host = "macbook"                         # this machine's host: scope name
+max_body = 4000                          # server host only: longest memory body, in characters
 ```
 
-`COMMONPLACE_URL` and `COMMONPLACE_HOST` override the file.
+`COMMONPLACE_URL`, `COMMONPLACE_HOST` and `COMMONPLACE_MAX_BODY` override the file.
 
 ```sh
-commonplace index                    # session index: global + this repo's project scope
+commonplace index                    # session index: global + this host + this repo's project scope
+commonplace index --instructions     # the server's rules for agents, then the index
 commonplace recall "python tooling"  # ranked search
 commonplace get global stack-preferences
 commonplace remember --scope global --name prefers-just --type feedback \
     --description "Use just, not make" --body "..." --agent cli
+commonplace remember --scope project:github.com/you/repo --name freeze --type project \
+    --description "Release freeze until the 1.0 tag" --body "..." --expires 2026-12-31
+commonplace update global prefers-just --body - <<'EOF'
+Use just, not make. Quotes, `backticks` and $VARS pass through stdin untouched.
+EOF
 commonplace call history '{"scope": "global", "name": "prefers-just"}'   # any MCP tool, JSON out
 commonplace export ./export          # markdown files, one per memory, for review or git
+commonplace stats --days 30          # tool calls, most-read and never-read memories (store host)
 ```
 
 ## Serving the tailnet
@@ -108,6 +129,10 @@ On every machine, point clients at it in `~/.config/commonplace/config.toml`
 (see above).
 
 ## Connecting agents
+
+There are two ways in: register the server as an MCP server and load the
+index with a session-start hook (Claude Code, Codex, other MCP clients), or
+load the bundled extension (pi, omp), which does both through the CLI.
 
 ### Claude Code
 
@@ -152,12 +177,35 @@ Until then `codex exec` skips it silently. As a fallback, add a line to
 ln -s "$PWD/integrations/pi/commonplace.ts" ~/.pi/agent/extensions/
 ```
 
-The extension appends the index to the system prompt and registers
-`memory_recall`, `memory_get`, `memory_remember`, `memory_update` and
-`memory_forget`. It calls the `commonplace` CLI, so it uses the same config
-file as everything else. It uses `appendSystemPrompt` rather
-than a custom prompt section because providers such as `pi-claude-bridge`
-forward only the append text.
+At session start the extension loads the server's rules for agents and the
+index (`commonplace index --instructions`) and appends them to the system
+prompt. It registers `memory_recall`, `memory_get`, `memory_remember`,
+`memory_update` and `memory_forget`, which call the `commonplace` CLI, so it
+uses the same config file as everything else; set `COMMONPLACE_BIN` to use
+another CLI binary. It uses `appendSystemPrompt` rather than a custom prompt
+section because providers such as `pi-claude-bridge` forward only the append
+text.
+
+### omp
+
+omp (oh-my-pi) loads pi extensions, so the same file works:
+
+```sh
+mkdir -p ~/.omp/agent/extensions && ln -s "$PWD/integrations/pi/commonplace.ts" ~/.omp/agent/extensions/
+```
+
+The rules and the index are added to the system prompt on every turn, and
+writes record the author as `omp@<host>`. Don't also list the server in
+`~/.omp/agent/mcp.json`, or omp gets two sets of memory tools.
+
+### Other MCP clients
+
+Register the server URL as a streamable-HTTP MCP server; the rules arrive as
+MCP server instructions. At session start the agent should call
+`memory_index` with the scopes `commonplace scope` prints for the working
+directory. Clients with a session-start hook can run `commonplace index`
+(add `--instructions` if the client drops server instructions); clients
+without one need the one-line instruction shown for Codex above.
 
 ## Bootstrapping from Claude Code memory
 
