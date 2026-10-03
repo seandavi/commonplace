@@ -4,23 +4,25 @@
   LaunchAgent for the commonplace tailnet HTTP server (see README → Serving
   the tailnet). Runs deploy/commonplace-tailnet.sh, which binds this
   machine's Tailscale IP on port 9322. No app-level auth: Tailscale is the
-  auth layer. Edit the paths for your machine before installing.
+  auth layer. Install with:
+    sed "s|__HOME__|$HOME|g" deploy/commonplace.plist > ~/Library/LaunchAgents/io.github.seandavi.commonplace.plist
+  (assumes the checkout is ~/Documents/git/commonplace; edit that path if not).
 -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.seandavis.commonplace</string>
+    <string>io.github.seandavi.commonplace</string>
 
     <key>ProgramArguments</key>
     <array>
         <string>/bin/sh</string>
-        <string>/Users/davsean/Documents/git/commonplace/deploy/commonplace-tailnet.sh</string>
+        <string>__HOME__/Documents/git/commonplace/deploy/commonplace-tailnet.sh</string>
     </array>
 
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/bin:/bin</string>
+        <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     </dict>
 
     <key>RunAtLoad</key>
@@ -29,8 +31,8 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>/Users/davsean/.local/state/commonplace-http.log</string>
+    <string>__HOME__/.local/state/commonplace-http.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/davsean/.local/state/commonplace-http.log</string>
+    <string>__HOME__/.local/state/commonplace-http.log</string>
 </dict>
 </plist>
