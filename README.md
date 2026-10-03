@@ -250,7 +250,7 @@ ln -s "$PWD/integrations/pi/commonplace.ts" ~/.pi/agent/extensions/
 or download a copy:
 
 ```sh
-curl -fsSL -o ~/.pi/agent/extensions/commonplace.ts \
+curl -fsSL --create-dirs -o ~/.pi/agent/extensions/commonplace.ts \
     https://raw.githubusercontent.com/seandavi/commonplace/main/integrations/pi/commonplace.ts
 ```
 
