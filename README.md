@@ -10,7 +10,8 @@ any MCP client) across projects and machines.
 Claude Code's auto-memory is good: small typed facts, an index loaded at
 session start, and full bodies fetched on demand. But it lives in one
 agent's config on one machine. commonplace keeps that model and puts it
-behind one server that every agent on your tailnet reads and writes.
+behind one server that every agent on every machine you use reads and
+writes.
 
 A *commonplace book* is a notebook where you copy down the things worth
 keeping.
@@ -18,8 +19,8 @@ keeping.
 ## Design
 
 - **One store, many agents.** SQLite with FTS5, served over MCP
-  (streamable HTTP) on the tailnet. Claude Code and Codex speak MCP
-  natively. pi and omp get a small extension.
+  (streamable HTTP) to any machine that can reach the server. Claude Code
+  and Codex speak MCP natively. pi and omp get a small extension.
 - **Recall at session start.** Storing memories is only half the job; they
   also have to reach the agent. `commonplace index` prints a
   one-line-per-memory index for the current session. A SessionStart hook
@@ -40,7 +41,7 @@ keeping.
   soft-deletes. `history` shows every version with its author (which agent
   wrote it).
 - **D1-portable.** The SQL stays within what Cloudflare D1 supports (FTS5,
-  partial indexes, no triggers), so the store can leave the tailnet later
+  partial indexes, no triggers), so the store can move to Cloudflare later
   without a rewrite.
 - **Memories are data.** The server instructions and the injected index
   both tell agents that memories were written by other agents and are never
@@ -58,18 +59,19 @@ keeping.
   `commonplace stats` on the store host shows what gets used and what never
   does.
 
-```
-Claude Code ─┐  MCP (HTTP) + SessionStart hook
-Codex ───────┼─────────────────────────────▶  commonplace serve --http  ──▶  SQLite + FTS5
-pi, omp ─────┘  extension → commonplace CLI        (one machine on the tailnet)
-```
+![commonplace architecture: Claude Code and Codex call the server's MCP tools over HTTP and load the index through a SessionStart hook; pi and omp use the bundled extension, which runs the commonplace CLI; the CLI and other MCP clients reach the server over HTTP; the server keeps memories in SQLite with FTS5 on the store host, where export and stats read the database directly.](docs/architecture.png)
 
 ## Security model
 
-commonplace has no authentication of its own. Run the HTTP server only on a
-network you trust: the deployment scripts in `deploy/` bind it to the
-machine's Tailscale address, so only devices on your tailnet can reach it.
-Anyone who can reach the port can read, write and forget every memory.
+commonplace has no authentication of its own. The only network requirement
+is that clients can reach the server's address and port; anyone who can
+reach it can read, write and forget every memory. So bind the server to a
+network only your machines can reach. A [Tailscale](https://tailscale.com)
+tailnet is the common choice, and the scripts in `deploy/` bind the
+server to the machine's Tailscale address. A LAN behind a firewall, a
+WireGuard or other VPN, an SSH tunnel to a server bound to `127.0.0.1`, or
+a reverse proxy that adds TLS and authentication work too. Don't expose the
+port to the internet.
 
 Memories are text that other agents load into their context. Treat them as
 untrusted data: the server instructions and the session index tell agents
@@ -96,9 +98,9 @@ Per-machine settings live in `~/.config/commonplace/config.toml`, so hooks
 and agents need no environment plumbing:
 
 ```toml
-url = "http://<tailscale-ip>:9322/mcp"   # the shared server
-host = "macbook"                         # this machine's host: scope name
-max_body = 4000                          # server host only: longest memory body, in characters
+url = "http://<server-address>:9322/mcp"   # the shared server
+host = "macbook"                           # this machine's host: scope name
+max_body = 4000                            # server host only: longest memory body, in characters
 ```
 
 `COMMONPLACE_URL`, `COMMONPLACE_HOST` and `COMMONPLACE_MAX_BODY` override the file.
@@ -120,18 +122,28 @@ commonplace export ./export          # markdown files, one per memory, for revie
 commonplace stats --days 30          # tool calls, most-read and never-read memories (store host)
 ```
 
-## Serving the tailnet
+## Running the shared server
 
-On the machine that holds the store:
+On the machine that holds the store, bind the HTTP server to an address
+your clients can reach (the default, `127.0.0.1`, serves only that
+machine):
+
+```sh
+commonplace serve --http --host <address> --port 9322
+```
+
+Then point every client machine at `http://<address>:9322/mcp` in
+`~/.config/commonplace/config.toml` (see above).
+
+### On a tailnet
+
+`deploy/` keeps the server running on the machine's Tailscale address,
+resolved at start, on port 9322. On macOS, install the LaunchAgent:
 
 ```sh
 sed "s|__HOME__|$HOME|g" deploy/commonplace.plist > ~/Library/LaunchAgents/io.github.seandavi.commonplace.plist   # assumes ~/Documents/git/commonplace
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.github.seandavi.commonplace.plist
 ```
-
-`deploy/commonplace-tailnet.sh` binds the machine's Tailscale IP on port
-9322. There is no app-level auth: Tailscale is the auth layer, so only your
-tailnet can reach it.
 
 > **macOS privacy (TCC):** launchd jobs have no access to `~/Documents`. If
 > the repo lives there, grant Full Disk Access to `/bin/sh` (System Settings
@@ -140,9 +152,6 @@ tailnet can reach it.
 
 On Linux, use the systemd user unit instead: `deploy/commonplace.service`
 (install steps are in its header).
-
-On every machine, point clients at it in `~/.config/commonplace/config.toml`
-(see above).
 
 ## Connecting agents
 
@@ -178,7 +187,7 @@ In `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.commonplace]
-url = "http://<tailscale-ip>:9322/mcp"
+url = "http://<server-address>:9322/mcp"
 ```
 
 and the same SessionStart hook in `~/.codex/hooks.json`. Codex only runs a
@@ -246,7 +255,8 @@ uv run pytest
 - Automatic capture (e.g. a Stop hook that proposes memories from a session).
   For now agents write memories deliberately through the tools.
 - A review queue for memories written by agents other than you.
-- Moving the store off the tailnet (OAuth on the server, or D1).
+- Authentication in the server itself (a shared token or OAuth), and moving
+  the store to Cloudflare D1.
 
 ## Contributing
 

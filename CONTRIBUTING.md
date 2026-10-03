@@ -28,6 +28,7 @@ Read these before proposing structural changes:
 - Add or update tests for every behavior change.
 - MCP tool names and arguments reach every connected agent; keep them backward compatible or explain why in the PR.
 - Keep `version` in `pyproject.toml` and `CITATION.cff` in sync.
+- `docs/architecture.png` is rendered from `docs/architecture.archify.json` with [archify](https://github.com/tt-a1i/archify): render the JSON to HTML, open it, and use Export → PNG in the light theme. Change both together.
 
 ## Conduct
 

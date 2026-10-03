@@ -6,8 +6,8 @@ row and point the old one at it, so history is never lost. Only live rows
 are kept in the FTS index.
 
 The SQL sticks to what Cloudflare D1 also speaks (SQLite + FTS5, partial
-indexes, no triggers), so the schema can move there if the store ever needs
-to leave the tailnet.
+indexes, no triggers), so the schema can move to Cloudflare if the store
+ever needs to.
 """
 
 from __future__ import annotations
