@@ -18,6 +18,7 @@ from typing import Any, Protocol
 
 PROTOCOL_VERSION = "2025-06-18"
 TIMEOUT_SECONDS = 5
+DISTRIBUTION = "commonplace-agent-memory"  # the PyPI name; `commonplace` is taken
 
 
 class ToolCallError(Exception):
@@ -94,7 +95,7 @@ class _HttpConnection:
             {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": {"name": "commonplace-cli", "version": version("commonplace")},
+                "clientInfo": {"name": "commonplace-cli", "version": version(DISTRIBUTION)},
             },
         )
         self._session = headers.get("mcp-session-id")
