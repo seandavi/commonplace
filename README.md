@@ -1,5 +1,7 @@
 # commonplace
 
+> **Moved (2026-10-18):** commonplace now lives in [seandavi/lookout](https://github.com/seandavi/lookout) as `lookout.memory`, stored in Postgres, with the same MCP tools and CLI. See lookout#10 and ADR 0002. This repository is archived.
+
 [![ci](https://github.com/seandavi/commonplace/actions/workflows/ci.yml/badge.svg)](https://github.com/seandavi/commonplace/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/commonplace-agent-memory.svg)](https://pypi.org/project/commonplace-agent-memory/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/seandavi/commonplace/blob/main/LICENSE)
